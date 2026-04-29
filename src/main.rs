@@ -28,6 +28,13 @@ enum Dragon {
     Red,
 }
 
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+enum Suit {
+    Man(u8),
+    So(u8),
+    Pin(u8),
+}
+
 impl std::fmt::Display for Dragon {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let c = match self {
@@ -37,13 +44,6 @@ impl std::fmt::Display for Dragon {
         };
         write!(f, "{c}")
     }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
-enum Suit {
-    Man(u8),
-    So(u8),
-    Pin(u8),
 }
 
 impl std::fmt::Display for Suit {
