@@ -1,5 +1,8 @@
 use core::num;
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    ops::{Index, IndexMut},
+};
 
 use itertools::Itertools;
 
@@ -50,47 +53,207 @@ fn decode_to_tile_nums(mut code: u32) -> Vec<u8> {
 //           g3.append((1, n3))
 //         combs.append(g3)
 //   return combs
+
+fn rec_all_possible_nums(num_tiles: usize, num_tile_kinds: usize) -> Vec<Vec<(u8, usize)>> {
+    assert!(num_tiles <= MAX_NUM_HAND_TILES);
+    let mut combinations = Vec::new();
+    let mut stack = Vec::new();
+
+    macro_rules! generate {
+        ($k:expr, $n:expr, $m:expr, $g:expr) => {
+            stack.push(($k, $n, $m, $g, (0..=$n).step_by($k as usize).enumerate()));
+        };
+    }
+    generate!(4u8, num_tiles, num_tile_kinds, Vec::new());
+    loop {
+        let Some((k, n, m, g, iter)) = stack.last_mut() else {
+            break;
+        };
+        let k = *k;
+        if let Some((i, l)) = iter.next() {
+            let mut g = g.clone();
+            if i > 0 {
+                g.push((k, i));
+            }
+            let n = *n - l;
+            let m = *m - i;
+            if k > 1 {
+                generate!(k - 1, n, m, g);
+            } else if m >= n {
+                g.push((1, n));
+                combinations.push(g);
+            }
+        } else {
+            stack.pop();
+        }
+    }
+    combinations
+}
+
 fn all_possible_nums(num_tiles: usize, num_variations: usize) -> Vec<Vec<(u8, usize)>> {
     assert!(num_tiles <= MAX_NUM_HAND_TILES);
     let mut combinations = Vec::new();
-
-    let n4 = num_tiles;
-    let m4 = num_variations;
-    for i4 in 0..(n4 / 4 + 1) {
-        let n3 = n4 - i4 * 4;
-        let m3 = m4 - i4;
-        let mut g3 = Vec::new();
-        if i4 > 0 {
-            g3.push((4, i4));
+    let num_t = num_tiles;
+    let num_v = num_variations;
+    for (i, l) in (0..=num_t).step_by(4).enumerate() {
+        let mut g = Vec::new();
+        if i > 0 {
+            g.push((4, i));
         }
-        let g3 = g3;
-        for i3 in 0..(n3 / 3 + 1) {
-            let n2 = n3 - i3 * 3;
-            let m2 = m3 - i3;
-            let mut g2 = g3.clone();
-            if i3 > 0 {
-                g2.push((4, i4));
+        let g = g;
+        let num_t = num_t - l;
+        let num_v = num_v - i;
+        for (i, l) in (0..=num_t).step_by(3).enumerate() {
+            let mut g = g.clone();
+            if i > 0 {
+                g.push((3, i));
             };
-            let g2 = g2;
-            for i2 in 0..(n2 / 2 + 1) {
-                let n1 = n2 - i2 * 2;
-                let m1 = m2 - i2;
-                if m1 < n1 {
+            let g = g;
+            let num_t = num_t - l;
+            let num_v = num_v - i;
+            for (i, l) in (0..=num_t).step_by(2).enumerate() {
+                // num_t - l > num_v - i => num_t > num_v + i
+                if num_t > num_v + i {
                     continue;
                 }
-                let mut g1 = g2.clone();
-                if i2 > 0 {
-                    g1.push((2, i2));
+                let mut g = g.clone();
+                if i > 0 {
+                    g.push((2, i));
                 };
-                if n1 > 0 {
-                    g1.push((1, n1));
+                if num_t > l {
+                    g.push((1, num_t - l));
                 }
-                combinations.push(g1);
+                combinations.push(g);
+            }
+        }
+    }
+    combinations
+}
+
+fn find_khotsu_patterns<const L: usize>(counter: &[u8; L]) -> Vec<Mentsu<L>> {
+    let mut ps = Vec::new();
+    for i in 0..L {
+        if counter[i] >= 3 {
+            ps.push(Mentsu::Khostu(i));
+        }
+    }
+    ps
+}
+
+// def find_shuntsu_patterns(g: list[int]) -> list[int]:
+//   patterns = []
+//   for i in range(9 - 2):
+//     if g[i] > 0 and g[i + 1] > 0 and g[i + 2] > 0:
+//       patterns.append(i)
+//   return patterns
+fn find_shuntsu_patterns<const L: usize>(counter: &[u8; L]) -> Vec<Mentsu<L>> {
+    let mut ps = Vec::new();
+    for i in 0..(L - 2) {
+        if counter[i] > 0 && counter[i + 1] > 0 && counter[i + 2] > 0 {
+            ps.push(Mentsu::Shuntsu(i));
+        }
+    }
+    ps
+}
+
+enum Mentsu<const L: usize> {
+    Khostu(usize),
+    Shuntsu(usize),
+}
+
+impl<const L: usize> Mentsu<L> {
+    #[inline]
+    fn discount(&self, counter: &mut [u8; L]) {
+        match self {
+            &Mentsu::Khostu(i) => {
+                counter[i] -= 3;
+            }
+            &Mentsu::Shuntsu(i) => {
+                counter[i] -= 1;
+                counter[i + 1] -= 1;
+                counter[i + 2] -= 1;
             }
         }
     }
 
-    combinations
+    #[inline]
+    fn count(&self, counter: &mut [u8; L]) {
+        match self {
+            &Mentsu::Khostu(i) => {
+                counter[i] += 3;
+            }
+            &Mentsu::Shuntsu(i) => {
+                counter[i] += 1;
+                counter[i + 1] += 1;
+                counter[i + 2] += 1;
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct SuhaiCounter([u8; MAX_SUHAI_NUM]);
+
+impl Index<usize> for SuhaiCounter {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for SuhaiCounter {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.0.index_mut(index)
+    }
+}
+
+impl SuhaiCounter {
+    fn encode(&self) -> u32 {
+        encode_tile_nums(&self.0)
+    }
+
+    fn find_mentsu_patterns(&self) -> Vec<Mentsu<MAX_SUHAI_NUM>> {
+        let mut ps = find_khotsu_patterns(&self.0);
+        ps.append(&mut find_shuntsu_patterns(&self.0));
+        ps
+    }
+
+    #[inline]
+    fn discount(&mut self, m: &Mentsu<MAX_SUHAI_NUM>) {
+        m.discount(&mut self.0);
+    }
+
+    #[inline]
+    fn count(&mut self, m: &Mentsu<MAX_SUHAI_NUM>) {
+        m.count(&mut self.0);
+    }
+
+    fn update_mentsu_count(&mut self, mentsu_table: &mut BTreeMap<u32, i32>) {
+        let code = self.encode();
+        let mut mc = None;
+        for m in self.find_mentsu_patterns() {
+            self.discount(&m);
+            let d = self.encode();
+            self.count(&m);
+            let temp = mentsu_table[&d] + 1;
+            if mc.is_none() {
+                mc = Some((m, temp));
+            } else if let Some((_, c)) = mc
+                && c < temp
+            {
+                mc = Some((m, temp));
+            }
+        }
+        mentsu_table.insert(
+            code,
+            mc.map(|(m, c)| {
+                self.discount(&m);
+                c
+            })
+            .unwrap_or_default(),
+        );
+    }
 }
 
 fn find_suhai_patterns() {
@@ -104,19 +267,22 @@ fn find_suhai_patterns() {
         for comb in all_possible_nums(n, MAX_SUHAI_NUM) {
             let mut m = MAX_SUHAI_NUM;
             // let mut ks = Vec::new();
-            let (ks, iters): (Vec<_>, Vec<_>) = comb.into_iter().map(|(k, n)| {
-                let iter = (0..m).combinations(n);
-                m -= n;
-                (k, iter)
-            }).unzip();
+            let (ks, iters): (Vec<_>, Vec<_>) = comb
+                .into_iter()
+                .map(|(k, n)| {
+                    let iter = (0..m).combinations(n);
+                    m -= n;
+                    (k, iter)
+                })
+                .unzip();
 
             for jss in iters.into_iter().multi_cartesian_product() {
-                let mut g = vec![0; MAX_SUHAI_NUM];
+                let mut g = SuhaiCounter::default();
                 let mut idxs: Vec<_> = (0..9).collect();
                 let mut hai_counter = [1; MAX_SUHAI_NUM];
-                
+
                 let jss_len = jss.len();
-                
+
                 for (l, js) in jss.into_iter().enumerate() {
                     let k = ks[l];
                     for &j in &js {
@@ -135,93 +301,24 @@ fn find_suhai_patterns() {
                         }
                     }
                 }
-                update_mentsu_count(&mut g, &mut mentsu_table);
+                g.update_mentsu_count(&mut mentsu_table);
             }
         }
     }
-//   # print(mentsu_table)
-//   # print(tahtsu_table)
-//   # for c, n in mentsu_table.items():
-//   #   g = decode(c)
-//   #   print(n, tahtsu_table[c], g)
-//   print(len(mentsu_table))
+    //   # print(mentsu_table)
+    //   # print(tahtsu_table)
+    //   # for c, n in mentsu_table.items():
+    //   #   g = decode(c)
+    //   #   print(n, tahtsu_table[c], g)
+    //   print(len(mentsu_table))
 }
 
-fn find_khotsu_patterns() -> Vec<usize> {
-    todo!()
-}
-
-fn find_shuntsu_patterns() -> Vec<usize> {
-    todo!()
-}
-
-fn update_mentsu_count(g: &mut Vec<u8>, mentsu_table: &mut BTreeMap<u32, i32>) {
-    let c = encode_tile_nums(&g);
-    let mut kim = None;
-    for i in find_khotsu_patterns() {
-        g[i] -= 3;
-        let d = encode_tile_nums(&g);
-        let temp = mentsu_table[&d] + 1;
-        match kim {
-            None => {
-                kim = Some((i, temp));
-            }
-            Some((_, km)) if temp > km => {
-                kim = Some((i, temp));
-            }
-            _ => {}
-        }
-        g[i] += 3;
-    }
-    let kim = kim;
-    let mut sim = None;
-    for i in find_shuntsu_patterns() {
-        g[i] -= 1;
-        g[i+1] -= 1;
-        g[i+2] -= 1;
-        let d = encode_tile_nums(&g);
-        let temp = mentsu_table[&d] + 1;
-        match sim {
-            None => {
-                sim = Some((i, temp));
-            }
-            Some((_, sm)) if temp > sm => {
-                sim = Some((i, temp));
-            }
-            _ => {}
-        }
-        g[i] += 1;
-        g[i+1] += 1;
-        g[i+2] += 1;
-    }
-    let sim = sim;
-
-    let e = mentsu_table.entry(c);
-    match (kim, sim) {
-        (None, None) => { e.or_default(); }
-        (Some((i, m)), None) => {
-            e.insert_entry(m);
-            g[i] -= 3;
-        }
-        (None, Some((i, m))) => {
-            e.insert_entry(m);
-            g[i] -= 1;
-            g[i+1] -= 1;
-            g[i+2] -= 1;
-        }
-        (Some((ki, km)), Some((si, sm))) => {
-            if km > sm {
-                e.insert_entry(km);
-                g[ki] -= 3;
-            } else {
-                e.insert_entry(sm);
-                g[si] -= 1;
-                g[si+1] -= 1;
-                g[si+2] -= 1;
-            }
-        }
-    }
-}
+// def find_kohtsu_patterns(g: list[int]) -> list[int]:
+//   patterns = []
+//   for i in range(9):
+//     if g[i] >= 3:
+//       patterns.append(i)
+//   return patterns
 
 //         max_n_tahtsu = 0
 //         for i in find_kanchan_patterns(g):
@@ -256,23 +353,6 @@ fn update_mentsu_count(g: &mut Vec<u8>, mentsu_table: &mut BTreeMap<u32, i32>) {
 //         tahtsu_table.setdefault(c, 0)
 //         tahtsu_table[c] = max_n_tahtsu
 
-
-// def find_shuntsu_patterns(g: list[int]) -> list[int]:
-//   patterns = []
-//   for i in range(9 - 2):
-//     if g[i] > 0 and g[i + 1] > 0 and g[i + 2] > 0:
-//       patterns.append(i)
-//   return patterns
-
-
-// def find_kohtsu_patterns(g: list[int]) -> list[int]:
-//   patterns = []
-//   for i in range(9):
-//     if g[i] >= 3:
-//       patterns.append(i)
-//   return patterns
-
-
 // def find_toitsu_patterns(g: list[int]) -> list[int]:
 //   patterns = []
 //   for i in range(9):
@@ -280,14 +360,12 @@ fn update_mentsu_count(g: &mut Vec<u8>, mentsu_table: &mut BTreeMap<u32, i32>) {
 //       patterns.append(i)
 //   return patterns
 
-
 // def find_ryanmen_patterns(g: list[int]) -> list[int]:
 //   patterns = []
 //   for i in range(9 - 3):
 //     if g[i] == 0 and g[i + 1] > 0 and g[i + 2] > 0 and g[i + 3] == 0:
 //       patterns.append(i)
 //   return patterns
-
 
 // def find_penchan_patterns(g: list[int]) -> list[int]:
 //   patterns = []
@@ -297,13 +375,11 @@ fn update_mentsu_count(g: &mut Vec<u8>, mentsu_table: &mut BTreeMap<u32, i32>) {
 //     patterns.append(7)
 //   return patterns
 
-
 // def find_kanchan_patterns(g: list[int]) -> list[int]:
 //   patterns = []
 //   for i in range(9 - 2):
 //     if g[i] > 0 and g[i + 1] == 0 and g[i + 2] > 0:
 //       patterns.append(i)
 //   return patterns
-
 
 // def main():
