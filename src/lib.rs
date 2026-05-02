@@ -277,41 +277,6 @@ impl<const L: usize> Counter<L> {
     }
 }
 
-enum Mentsu<const L: usize> {
-    Khostu(usize),
-    Shuntsu(usize),
-}
-
-impl<const L: usize> Mentsu<L> {
-    #[inline]
-    fn discount(&self, counter: &mut [u8; L]) {
-        match self {
-            &Mentsu::Khostu(i) => {
-                counter[i] -= 3;
-            }
-            &Mentsu::Shuntsu(i) => {
-                counter[i] -= 1;
-                counter[i + 1] -= 1;
-                counter[i + 2] -= 1;
-            }
-        }
-    }
-
-    #[inline]
-    fn count(&self, counter: &mut [u8; L]) {
-        match self {
-            &Mentsu::Khostu(i) => {
-                counter[i] += 3;
-            }
-            &Mentsu::Shuntsu(i) => {
-                counter[i] += 1;
-                counter[i + 1] += 1;
-                counter[i + 2] += 1;
-            }
-        }
-    }
-}
-
 pub struct SuhaiCounter(Counter<MAX_SUHAI_NUM>);
 pub struct WindCounter(Counter<MAX_JIHAI_NUM>);
 
@@ -319,8 +284,12 @@ impl SuhaiCounter {
     fn update_mentsu_count(&mut self, mentsu_table: &mut BTreeMap<u32, i32>) {
         let code = self.0.encode();
         let mut mc = None;
-        mc = self.0.find_max_group(self.0.find(GroupType::Triple), mc, mentsu_table);
-        mc = self.0.find_max_group(self.0.find(GroupType::Continuous), mc, mentsu_table);
+        mc = self
+            .0
+            .find_max_group(self.0.find(GroupType::Triple), mc, mentsu_table);
+        mc = self
+            .0
+            .find_max_group(self.0.find(GroupType::Continuous), mc, mentsu_table);
         mentsu_table.insert(
             code,
             mc.map(|(m, c)| {
