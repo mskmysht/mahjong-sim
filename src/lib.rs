@@ -9,6 +9,7 @@ use itertools::Itertools;
 const CODE_RADIX: u32 = 5;
 const MAX_NUM_HAND_TILES: usize = 14;
 const MAX_SUHAI_NUM: usize = 9;
+const MAX_JIHAI_NUM: usize = 7;
 
 fn encode_tile_nums(nums: &[u8]) -> u32 {
     let mut c = 0;
@@ -27,32 +28,6 @@ fn decode_to_tile_nums(mut code: u32) -> Vec<u8> {
     }
     nums
 }
-
-// def iterate(n: int) -> list[list[int]]:
-//   assert n <= 14
-//   combs = []
-//   for i in range(0, n // 4 + 1):
-//     n1 = n - i * 4
-//     m1 = 9 - i
-//     g1 = [] if i == 0 else [(4, i)]
-//     for j in range(0, n1 // 3 + 1):
-//       n2 = n1 - j * 3
-//       m2 = m1 - j
-//       g2 = [p for p in g1]
-//       if j > 0:
-//         g2.append((3, j))
-//       for k in range(0, n2 // 2 + 1):
-//         n3 = n2 - k * 2
-//         m3 = m2 - k
-//         if m3 < n3:
-//           continue
-//         g3 = [p for p in g2]
-//         if k > 0:
-//           g3.append((2, k))
-//         if n3 > 0:
-//           g3.append((1, n3))
-//         combs.append(g3)
-//   return combs
 
 fn rec_all_possible_nums(num_tiles: usize, num_tile_kinds: usize) -> Vec<Vec<(u8, usize)>> {
     assert!(num_tiles <= MAX_NUM_HAND_TILES);
@@ -130,30 +105,176 @@ fn all_possible_nums(num_tiles: usize, num_variations: usize) -> Vec<Vec<(u8, us
     combinations
 }
 
-fn find_khotsu_patterns<const L: usize>(counter: &[u8; L]) -> Vec<Mentsu<L>> {
-    let mut ps = Vec::new();
-    for i in 0..L {
-        if counter[i] >= 3 {
-            ps.push(Mentsu::Khostu(i));
-        }
-    }
-    ps
+#[derive(Clone)]
+enum GroupType {
+    Triple,
+    Double,
+    Skip,
+    Sequence,
+    Continuous,
 }
 
-// def find_shuntsu_patterns(g: list[int]) -> list[int]:
-//   patterns = []
-//   for i in range(9 - 2):
-//     if g[i] > 0 and g[i + 1] > 0 and g[i + 2] > 0:
-//       patterns.append(i)
-//   return patterns
-fn find_shuntsu_patterns<const L: usize>(counter: &[u8; L]) -> Vec<Mentsu<L>> {
-    let mut ps = Vec::new();
-    for i in 0..(L - 2) {
-        if counter[i] > 0 && counter[i + 1] > 0 && counter[i + 2] > 0 {
-            ps.push(Mentsu::Shuntsu(i));
+struct Group(GroupType, usize);
+
+impl Group {
+    fn find<const L: usize>(gt: GroupType, counter: &Counter<L>, i: usize) -> Option<Self> {
+        match gt {
+            GroupType::Triple => {
+                let &c = counter.0.get(i)?;
+                if c >= 3 { Some(Self(gt, i)) } else { None }
+            }
+            GroupType::Double => {
+                let &c = counter.0.get(i)?;
+                if c >= 2 { Some(Self(gt, i)) } else { None }
+            }
+            GroupType::Skip => {
+                let &c0 = counter.0.get(i)?;
+                let &c2 = counter.0.get(i + 2)?;
+                if c0 > 0 && c2 > 0 {
+                    Some(Self(gt, i))
+                } else {
+                    None
+                }
+            }
+            GroupType::Sequence => {
+                let &c0 = counter.0.get(i)?;
+                let &c1 = counter.0.get(i + 1)?;
+                if c0 > 0 && c1 > 0 {
+                    Some(Self(gt, i))
+                } else {
+                    None
+                }
+            }
+            GroupType::Continuous => {
+                let &c0 = counter.0.get(i)?;
+                let &c1 = counter.0.get(i + 1)?;
+                let &c2 = counter.0.get(i + 2)?;
+                if c0 > 0 && c1 > 0 && c2 > 0 {
+                    Some(Self(gt, i))
+                } else {
+                    None
+                }
+            }
         }
     }
-    ps
+}
+
+struct Counter<const L: usize>([u8; L]);
+
+impl<const L: usize> Counter<L> {
+    fn zero() -> Self {
+        Self([0; L])
+    }
+
+    fn encode(&self) -> u32 {
+        encode_tile_nums(&self.0)
+    }
+
+    fn discount(&mut self, Group(gt, i): &Group) {
+        let i = *i;
+        match gt {
+            GroupType::Triple => {
+                self.0[i] -= 3;
+            }
+            GroupType::Double => {
+                self.0[i] -= 2;
+            }
+            GroupType::Skip => {
+                self.0[i] -= 1;
+                self.0[i + 2] -= 1;
+            }
+            GroupType::Sequence => {
+                self.0[i] -= 1;
+                self.0[i + 1] -= 1;
+            }
+            GroupType::Continuous => {
+                self.0[i] -= 1;
+                self.0[i + 1] -= 1;
+                self.0[i + 2] -= 1;
+            }
+        }
+    }
+
+    fn count(&mut self, Group(gt, i): &Group) {
+        let i = *i;
+        match gt {
+            GroupType::Triple => {
+                self.0[i] += 3;
+            }
+            GroupType::Double => {
+                self.0[i] += 2;
+            }
+            GroupType::Skip => {
+                self.0[i] += 1;
+                self.0[i + 2] += 1;
+            }
+            GroupType::Sequence => {
+                self.0[i] += 1;
+                self.0[i + 1] += 1;
+            }
+            GroupType::Continuous => {
+                self.0[i] += 1;
+                self.0[i + 1] += 1;
+                self.0[i + 2] += 1;
+            }
+        }
+    }
+
+    fn find(&self, gt: GroupType) -> Vec<Group> {
+        (0..L)
+            .filter_map(|i| Group::find(gt.clone(), self, i))
+            .collect()
+    }
+
+    fn find_max_group<T: for<'d> Index<&'d u32, Output = i32>>(
+        &mut self,
+        groups: Vec<Group>,
+        mut mg: Option<(Group, i32)>,
+        mentsu_table: &T,
+    ) -> Option<(Group, i32)> {
+        for m in groups {
+            self.discount(&m);
+            let d = self.encode();
+            self.count(&m);
+            let temp = mentsu_table[&d] + 1;
+            if mg.is_none() {
+                mg = Some((m, temp));
+            } else if let Some((_, c)) = mg
+                && c < temp
+            {
+                mg = Some((m, temp));
+            }
+        }
+        mg
+    }
+
+    fn new(jss: Vec<Vec<usize>>, ks: &[u8]) -> Self {
+        let mut counter = Self::zero();
+        let mut idxs: Vec<_> = (0..9).collect();
+        let mut tile_flags = [true; L];
+
+        let jss_len = jss.len();
+
+        for (l, js) in jss.into_iter().enumerate() {
+            let k = ks[l];
+            for &j in &js {
+                counter.0[idxs[j]] = k;
+            }
+            if l == jss_len - 1 {
+                break;
+            }
+            for j in js {
+                tile_flags[idxs[j]] = false;
+            }
+            idxs.clear();
+            for i in 0..L {
+                if tile_flags[i] {
+                    idxs.push(i);
+                }
+            }
+        }
+        counter
+    }
 }
 
 enum Mentsu<const L: usize> {
@@ -191,64 +312,19 @@ impl<const L: usize> Mentsu<L> {
     }
 }
 
-#[derive(Default)]
-struct SuhaiCounter([u8; MAX_SUHAI_NUM]);
-
-impl Index<usize> for SuhaiCounter {
-    type Output = u8;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-impl IndexMut<usize> for SuhaiCounter {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.0.index_mut(index)
-    }
-}
+pub struct SuhaiCounter(Counter<MAX_SUHAI_NUM>);
+pub struct WindCounter(Counter<MAX_JIHAI_NUM>);
 
 impl SuhaiCounter {
-    fn encode(&self) -> u32 {
-        encode_tile_nums(&self.0)
-    }
-
-    fn find_mentsu_patterns(&self) -> Vec<Mentsu<MAX_SUHAI_NUM>> {
-        let mut ps = find_khotsu_patterns(&self.0);
-        ps.append(&mut find_shuntsu_patterns(&self.0));
-        ps
-    }
-
-    #[inline]
-    fn discount(&mut self, m: &Mentsu<MAX_SUHAI_NUM>) {
-        m.discount(&mut self.0);
-    }
-
-    #[inline]
-    fn count(&mut self, m: &Mentsu<MAX_SUHAI_NUM>) {
-        m.count(&mut self.0);
-    }
-
     fn update_mentsu_count(&mut self, mentsu_table: &mut BTreeMap<u32, i32>) {
-        let code = self.encode();
+        let code = self.0.encode();
         let mut mc = None;
-        for m in self.find_mentsu_patterns() {
-            self.discount(&m);
-            let d = self.encode();
-            self.count(&m);
-            let temp = mentsu_table[&d] + 1;
-            if mc.is_none() {
-                mc = Some((m, temp));
-            } else if let Some((_, c)) = mc
-                && c < temp
-            {
-                mc = Some((m, temp));
-            }
-        }
+        mc = self.0.find_max_group(self.0.find(GroupType::Triple), mc, mentsu_table);
+        mc = self.0.find_max_group(self.0.find(GroupType::Continuous), mc, mentsu_table);
         mentsu_table.insert(
             code,
             mc.map(|(m, c)| {
-                self.discount(&m);
+                self.0.discount(&m);
                 c
             })
             .unwrap_or_default(),
@@ -277,31 +353,8 @@ fn find_suhai_patterns() {
                 .unzip();
 
             for jss in iters.into_iter().multi_cartesian_product() {
-                let mut g = SuhaiCounter::default();
-                let mut idxs: Vec<_> = (0..9).collect();
-                let mut hai_counter = [1; MAX_SUHAI_NUM];
-
-                let jss_len = jss.len();
-
-                for (l, js) in jss.into_iter().enumerate() {
-                    let k = ks[l];
-                    for &j in &js {
-                        g[idxs[j]] = k;
-                    }
-                    if l == jss_len - 1 {
-                        break;
-                    }
-                    for j in js {
-                        hai_counter[idxs[j]] -= 1;
-                    }
-                    idxs.clear();
-                    for i in 0..MAX_SUHAI_NUM {
-                        if hai_counter[i] > 0 {
-                            idxs.push(i);
-                        }
-                    }
-                }
-                g.update_mentsu_count(&mut mentsu_table);
+                let mut counter = SuhaiCounter(Counter::new(jss, &ks));
+                counter.update_mentsu_count(&mut mentsu_table);
             }
         }
     }
@@ -352,34 +405,5 @@ fn find_suhai_patterns() {
 //           g[i] += 2
 //         tahtsu_table.setdefault(c, 0)
 //         tahtsu_table[c] = max_n_tahtsu
-
-// def find_toitsu_patterns(g: list[int]) -> list[int]:
-//   patterns = []
-//   for i in range(9):
-//     if g[i] == 2:
-//       patterns.append(i)
-//   return patterns
-
-// def find_ryanmen_patterns(g: list[int]) -> list[int]:
-//   patterns = []
-//   for i in range(9 - 3):
-//     if g[i] == 0 and g[i + 1] > 0 and g[i + 2] > 0 and g[i + 3] == 0:
-//       patterns.append(i)
-//   return patterns
-
-// def find_penchan_patterns(g: list[int]) -> list[int]:
-//   patterns = []
-//   if g[0] > 0 and g[1] > 0 and g[2] == 0:
-//     patterns.append(0)
-//   if g[8] > 0 and g[7] > 0 and g[6] == 0:
-//     patterns.append(7)
-//   return patterns
-
-// def find_kanchan_patterns(g: list[int]) -> list[int]:
-//   patterns = []
-//   for i in range(9 - 2):
-//     if g[i] > 0 and g[i + 1] == 0 and g[i + 2] > 0:
-//       patterns.append(i)
-//   return patterns
 
 // def main():
