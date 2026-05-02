@@ -117,7 +117,7 @@ enum GroupType {
 struct Group(GroupType, usize);
 
 impl Group {
-    fn find<const L: usize>(gt: GroupType, counter: &Counter<L>, i: usize) -> Option<Self> {
+    fn find<const L: usize>(gt: GroupType, counter: &TileCounter<L>, i: usize) -> Option<Self> {
         match gt {
             GroupType::Triple => {
                 let &c = counter.0.get(i)?;
@@ -159,9 +159,53 @@ impl Group {
     }
 }
 
-struct Counter<const L: usize>([u8; L]);
+struct GroupCounter {
+    inner: Vec<u32>,
+    length: usize,
+}
 
-impl<const L: usize> Counter<L> {
+impl GroupCounter {
+    fn new() -> Self {
+        let length = 5;
+        Self {
+            inner: vec![0; length],
+            length,
+        }
+    }
+    #[inline]
+    fn to_index(gt: &GroupType) -> usize {
+        match gt {
+            GroupType::Triple => 0,
+            GroupType::Double => 1,
+            GroupType::Skip => 2,
+            GroupType::Sequence => 3,
+            GroupType::Continuous => 4,
+        }
+    }
+
+    fn all(&self) -> u32 {
+        self.inner.iter().sum()
+    }
+}
+
+impl Index<&GroupType> for GroupCounter {
+    type Output = u32;
+    fn index(&self, index: &GroupType) -> &Self::Output {
+        &self.inner[Self::to_index(index)]
+    }
+}
+
+impl IndexMut<&GroupType> for GroupCounter {
+    fn index_mut(&mut self, index: &GroupType) -> &mut Self::Output {
+        &mut self.inner[Self::to_index(index)]
+    }
+}
+
+type TileGroupMap = BTreeMap<u32, GroupCounter>;
+
+struct TileCounter<const L: usize>([u8; L]);
+
+impl<const L: usize> TileCounter<L> {
     fn zero() -> Self {
         Self([0; L])
     }
@@ -220,32 +264,36 @@ impl<const L: usize> Counter<L> {
         }
     }
 
-    fn find(&self, gt: GroupType) -> Vec<Group> {
+    fn find(&self, gt: &GroupType) -> Vec<Group> {
         (0..L)
             .filter_map(|i| Group::find(gt.clone(), self, i))
             .collect()
     }
 
-    fn find_max_group<T: for<'d> Index<&'d u32, Output = i32>>(
-        &mut self,
-        groups: Vec<Group>,
-        mut mg: Option<(Group, i32)>,
-        mentsu_table: &T,
-    ) -> Option<(Group, i32)> {
-        for m in groups {
-            self.discount(&m);
-            let d = self.encode();
-            self.count(&m);
-            let temp = mentsu_table[&d] + 1;
-            if mg.is_none() {
-                mg = Some((m, temp));
-            } else if let Some((_, c)) = mg
-                && c < temp
-            {
-                mg = Some((m, temp));
+    fn update_group_count(&mut self, target_gts: &[GroupType], tgm: &mut TileGroupMap) {
+        let code = self.encode();
+        let mut mg = None;
+        for gt in target_gts {
+            for group in self.find(gt) {
+                self.discount(&group);
+                let d = self.encode();
+                self.count(&group);
+                let temp = tgm[&d].all();
+                if mg.is_none() {
+                    mg = Some((group, temp));
+                } else if let Some((_, c)) = mg
+                    && c < temp
+                {
+                    mg = Some((group, temp));
+                }
             }
         }
-        mg
+        let entry = tgm.entry(code);
+        let gt = entry.or_insert(GroupCounter::new());
+        if let Some((group, _)) = mg {
+            self.discount(&group);
+            gt[&group.0] += 1;
+        }
     }
 
     fn new(jss: Vec<Vec<usize>>, ks: &[u8]) -> Self {
@@ -277,36 +325,15 @@ impl<const L: usize> Counter<L> {
     }
 }
 
-pub struct SuhaiCounter(Counter<MAX_SUHAI_NUM>);
-pub struct WindCounter(Counter<MAX_JIHAI_NUM>);
-
-impl SuhaiCounter {
-    fn update_mentsu_count(&mut self, mentsu_table: &mut BTreeMap<u32, i32>) {
-        let code = self.0.encode();
-        let mut mc = None;
-        mc = self
-            .0
-            .find_max_group(self.0.find(GroupType::Triple), mc, mentsu_table);
-        mc = self
-            .0
-            .find_max_group(self.0.find(GroupType::Continuous), mc, mentsu_table);
-        mentsu_table.insert(
-            code,
-            mc.map(|(m, c)| {
-                self.0.discount(&m);
-                c
-            })
-            .unwrap_or_default(),
-        );
-    }
-}
+pub struct SuhaiCounter(TileCounter<MAX_SUHAI_NUM>);
+pub struct WindCounter(TileCounter<MAX_JIHAI_NUM>);
 
 fn find_suhai_patterns() {
     let mut mentsu_table = BTreeMap::new();
-    let mut tahtsu_table = BTreeMap::new();
+    // let mut tahtsu_table = BTreeMap::new();
 
-    mentsu_table.insert(0, 0);
-    tahtsu_table.insert(0, 0);
+    mentsu_table.insert(0, GroupCounter::new());
+    // tahtsu_table.insert(0, 0);
 
     for n in 0..=MAX_NUM_HAND_TILES {
         for comb in all_possible_nums(n, MAX_SUHAI_NUM) {
@@ -322,8 +349,11 @@ fn find_suhai_patterns() {
                 .unzip();
 
             for jss in iters.into_iter().multi_cartesian_product() {
-                let mut counter = SuhaiCounter(Counter::new(jss, &ks));
-                counter.update_mentsu_count(&mut mentsu_table);
+                let mut counter = TileCounter::<MAX_SUHAI_NUM>::new(jss, &ks);
+                counter.update_group_count(
+                    &[GroupType::Triple, GroupType::Continuous],
+                    &mut mentsu_table,
+                );
             }
         }
     }
