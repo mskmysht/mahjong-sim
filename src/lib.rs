@@ -1,4 +1,3 @@
-use core::num;
 use std::{
     collections::BTreeMap,
     ops::{Index, IndexMut},
@@ -106,7 +105,7 @@ fn all_possible_nums(num_tiles: usize, num_variations: usize) -> Vec<Vec<(u8, us
 }
 
 #[derive(Clone)]
-enum GroupType {
+pub enum GroupType {
     Triple,
     Double,
     Skip,
@@ -159,6 +158,7 @@ impl Group {
     }
 }
 
+#[allow(dead_code)]
 struct GroupCounter {
     inner: Vec<u32>,
     length: usize,
@@ -201,7 +201,9 @@ impl IndexMut<&GroupType> for GroupCounter {
     }
 }
 
-type TileGroupMap = BTreeMap<u32, GroupCounter>;
+pub struct TileGroupMap {
+    inner: BTreeMap<u32, GroupCounter>,
+}
 
 struct TileCounter<const L: usize>([u8; L]);
 
@@ -278,7 +280,7 @@ impl<const L: usize> TileCounter<L> {
                 self.discount(&group);
                 let d = self.encode();
                 self.count(&group);
-                let temp = tgm[&d].all();
+                let temp = tgm.inner[&d].all();
                 if mg.is_none() {
                     mg = Some((group, temp));
                 } else if let Some((_, c)) = mg
@@ -288,7 +290,7 @@ impl<const L: usize> TileCounter<L> {
                 }
             }
         }
-        let entry = tgm.entry(code);
+        let entry = tgm.inner.entry(code);
         let gt = entry.or_insert(GroupCounter::new());
         if let Some((group, _)) = mg {
             self.discount(&group);
@@ -325,44 +327,40 @@ impl<const L: usize> TileCounter<L> {
     }
 }
 
-pub struct SuhaiCounter(TileCounter<MAX_SUHAI_NUM>);
-pub struct WindCounter(TileCounter<MAX_JIHAI_NUM>);
+// pub struct SuhaiCounter(TileCounter<MAX_SUHAI_NUM>);
+// pub struct WindCounter(TileCounter<MAX_JIHAI_NUM>);
 
-fn find_suhai_patterns() {
-    let mut mentsu_table = BTreeMap::new();
-    // let mut tahtsu_table = BTreeMap::new();
+impl TileGroupMap {
+    fn empty() -> Self {
+        let mut inner = BTreeMap::new();
+        inner.insert(0, GroupCounter::new());
+        TileGroupMap { inner }
+    }
 
-    mentsu_table.insert(0, GroupCounter::new());
-    // tahtsu_table.insert(0, 0);
+    pub fn new<const L: usize>(complete_gts: &[GroupType], impcomplete_gts: &[GroupType]) -> Self {
+        let mut this = Self::empty();
 
-    for n in 0..=MAX_NUM_HAND_TILES {
-        for comb in all_possible_nums(n, MAX_SUHAI_NUM) {
-            let mut m = MAX_SUHAI_NUM;
-            // let mut ks = Vec::new();
-            let (ks, iters): (Vec<_>, Vec<_>) = comb
-                .into_iter()
-                .map(|(k, n)| {
-                    let iter = (0..m).combinations(n);
-                    m -= n;
-                    (k, iter)
-                })
-                .unzip();
+        for n in 0..=MAX_NUM_HAND_TILES {
+            for comb in all_possible_nums(n, L) {
+                let mut m = L;
+                let (ks, iters): (Vec<_>, Vec<_>) = comb
+                    .into_iter()
+                    .map(|(k, n)| {
+                        let iter = (0..m).combinations(n);
+                        m -= n;
+                        (k, iter)
+                    })
+                    .unzip();
 
-            for jss in iters.into_iter().multi_cartesian_product() {
-                let mut counter = TileCounter::<MAX_SUHAI_NUM>::new(jss, &ks);
-                counter.update_group_count(
-                    &[GroupType::Triple, GroupType::Continuous],
-                    &mut mentsu_table,
-                );
+                for jss in iters.into_iter().multi_cartesian_product() {
+                    let mut counter = TileCounter::<L>::new(jss, &ks);
+                    counter.update_group_count(complete_gts, &mut this);
+                    counter.update_group_count(impcomplete_gts, &mut this);
+                }
             }
         }
+        this
     }
-    //   # print(mentsu_table)
-    //   # print(tahtsu_table)
-    //   # for c, n in mentsu_table.items():
-    //   #   g = decode(c)
-    //   #   print(n, tahtsu_table[c], g)
-    //   print(len(mentsu_table))
 }
 
 // def find_kohtsu_patterns(g: list[int]) -> list[int]:
@@ -404,5 +402,3 @@ fn find_suhai_patterns() {
 //           g[i] += 2
 //         tahtsu_table.setdefault(c, 0)
 //         tahtsu_table[c] = max_n_tahtsu
-
-// def main():
