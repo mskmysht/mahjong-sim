@@ -7,8 +7,8 @@ use itertools::Itertools;
 
 const CODE_RADIX: u32 = 5;
 const MAX_NUM_HAND_TILES: usize = 14;
-const MAX_SUHAI_NUM: usize = 9;
-const MAX_JIHAI_NUM: usize = 7;
+const NUM_NUMBER_TILES: usize = 9;
+const NUM_CHAR_TILES: usize = 7;
 
 fn encode_tile_nums(nums: &[u8]) -> u32 {
     let mut c = 0;
@@ -18,16 +18,16 @@ fn encode_tile_nums(nums: &[u8]) -> u32 {
     c
 }
 
-fn decode_to_tile_nums(mut code: u32) -> Vec<u8> {
-    let mut nums = Vec::new();
-    while code > 0 {
-        let d = code % CODE_RADIX;
-        nums.push(d as u8);
+fn decode_to_tile_nums<const L: usize>(mut code: u32) -> [u8; L] {
+    let mut nums = [0; L];
+    for i in 0..L {
+        nums[i] = (code % CODE_RADIX) as u8;
         code /= CODE_RADIX;
     }
     nums
 }
 
+#[allow(dead_code)]
 fn rec_all_possible_nums(num_tiles: usize, num_tile_kinds: usize) -> Vec<Vec<(u8, usize)>> {
     assert!(num_tiles <= MAX_NUM_HAND_TILES);
     let mut combinations = Vec::new();
@@ -64,6 +64,7 @@ fn rec_all_possible_nums(num_tiles: usize, num_tile_kinds: usize) -> Vec<Vec<(u8
     combinations
 }
 
+#[allow(dead_code)]
 fn all_possible_nums(num_tiles: usize, num_variations: usize) -> Vec<Vec<(u8, usize)>> {
     assert!(num_tiles <= MAX_NUM_HAND_TILES);
     let mut combinations = Vec::new();
@@ -107,10 +108,10 @@ fn all_possible_nums(num_tiles: usize, num_variations: usize) -> Vec<Vec<(u8, us
 #[derive(Clone)]
 pub enum GroupType {
     Triple,
-    Double,
-    Skip,
     Sequence,
-    Continuous,
+    Neighbor,
+    Skip,
+    Double,
 }
 
 struct Group(GroupType, usize);
@@ -126,16 +127,17 @@ impl Group {
                 let &c = counter.0.get(i)?;
                 if c >= 2 { Some(Self(gt, i)) } else { None }
             }
-            GroupType::Skip => {
+            GroupType::Sequence => {
                 let &c0 = counter.0.get(i)?;
+                let &c1 = counter.0.get(i + 1)?;
                 let &c2 = counter.0.get(i + 2)?;
-                if c0 > 0 && c2 > 0 {
+                if c0 > 0 && c1 > 0 && c2 > 0 {
                     Some(Self(gt, i))
                 } else {
                     None
                 }
             }
-            GroupType::Sequence => {
+            GroupType::Neighbor => {
                 let &c0 = counter.0.get(i)?;
                 let &c1 = counter.0.get(i + 1)?;
                 if c0 > 0 && c1 > 0 {
@@ -144,11 +146,10 @@ impl Group {
                     None
                 }
             }
-            GroupType::Continuous => {
+            GroupType::Skip => {
                 let &c0 = counter.0.get(i)?;
-                let &c1 = counter.0.get(i + 1)?;
                 let &c2 = counter.0.get(i + 2)?;
-                if c0 > 0 && c1 > 0 && c2 > 0 {
+                if c0 > 0 && c2 > 0 {
                     Some(Self(gt, i))
                 } else {
                     None
@@ -159,27 +160,23 @@ impl Group {
 }
 
 #[allow(dead_code)]
-struct GroupCounter {
+#[derive(Clone, Debug)]
+pub struct GroupCounter {
     inner: Vec<u32>,
-    length: usize,
 }
 
 impl GroupCounter {
     fn new() -> Self {
-        let length = 5;
-        Self {
-            inner: vec![0; length],
-            length,
-        }
+        Self { inner: Vec::new() }
     }
     #[inline]
     fn to_index(gt: &GroupType) -> usize {
         match gt {
             GroupType::Triple => 0,
-            GroupType::Double => 1,
-            GroupType::Skip => 2,
-            GroupType::Sequence => 3,
-            GroupType::Continuous => 4,
+            GroupType::Sequence => 1,
+            GroupType::Double => 2,
+            GroupType::Skip => 3,
+            GroupType::Neighbor => 4,
         }
     }
 
@@ -191,12 +188,17 @@ impl GroupCounter {
 impl Index<&GroupType> for GroupCounter {
     type Output = u32;
     fn index(&self, index: &GroupType) -> &Self::Output {
-        &self.inner[Self::to_index(index)]
+        let i = Self::to_index(index);
+        self.inner.get(i).unwrap_or(&0)
     }
 }
 
 impl IndexMut<&GroupType> for GroupCounter {
     fn index_mut(&mut self, index: &GroupType) -> &mut Self::Output {
+        let i = Self::to_index(index);
+        for _ in (self.inner.len())..=i {
+            self.inner.push(0);
+        }
         &mut self.inner[Self::to_index(index)]
     }
 }
@@ -205,15 +207,29 @@ pub struct TileGroupMap {
     inner: BTreeMap<u32, GroupCounter>,
 }
 
-struct TileCounter<const L: usize>([u8; L]);
+impl<'a> IntoIterator for &'a TileGroupMap {
+    type Item = <&'a BTreeMap<u32, GroupCounter> as IntoIterator>::Item;
+    type IntoIter = <&'a BTreeMap<u32, GroupCounter> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.inner).into_iter()
+    }
+}
+
+#[derive(Debug)]
+pub struct TileCounter<const L: usize>([u8; L]);
 
 impl<const L: usize> TileCounter<L> {
     fn zero() -> Self {
         Self([0; L])
     }
 
-    fn encode(&self) -> u32 {
+    pub fn encode(&self) -> u32 {
         encode_tile_nums(&self.0)
+    }
+
+    pub fn decode(code: u32) -> Self {
+        Self(decode_to_tile_nums(code))
     }
 
     fn discount(&mut self, Group(gt, i): &Group) {
@@ -229,11 +245,11 @@ impl<const L: usize> TileCounter<L> {
                 self.0[i] -= 1;
                 self.0[i + 2] -= 1;
             }
-            GroupType::Sequence => {
+            GroupType::Neighbor => {
                 self.0[i] -= 1;
                 self.0[i + 1] -= 1;
             }
-            GroupType::Continuous => {
+            GroupType::Sequence => {
                 self.0[i] -= 1;
                 self.0[i + 1] -= 1;
                 self.0[i + 2] -= 1;
@@ -254,11 +270,11 @@ impl<const L: usize> TileCounter<L> {
                 self.0[i] += 1;
                 self.0[i + 2] += 1;
             }
-            GroupType::Sequence => {
+            GroupType::Neighbor => {
                 self.0[i] += 1;
                 self.0[i + 1] += 1;
             }
-            GroupType::Continuous => {
+            GroupType::Sequence => {
                 self.0[i] += 1;
                 self.0[i + 1] += 1;
                 self.0[i + 2] += 1;
@@ -272,7 +288,7 @@ impl<const L: usize> TileCounter<L> {
             .collect()
     }
 
-    fn update_group_count(&mut self, target_gts: &[GroupType], tgm: &mut TileGroupMap) {
+    fn insert_group_count(&mut self, target_gts: &[GroupType], tgm: &mut TileGroupMap) {
         let code = self.encode();
         let mut mg = None;
         for gt in target_gts {
@@ -280,21 +296,25 @@ impl<const L: usize> TileCounter<L> {
                 self.discount(&group);
                 let d = self.encode();
                 self.count(&group);
-                let temp = tgm.inner[&d].all();
+                let gc = &tgm.inner[&d];
+                let temp = gc.all();
                 if mg.is_none() {
-                    mg = Some((group, temp));
-                } else if let Some((_, c)) = mg
-                    && c < temp
+                    mg = Some((group, gc, temp));
+                } else if let Some((_, _, a)) = mg
+                    && a < temp
                 {
-                    mg = Some((group, temp));
+                    mg = Some((group, gc, temp));
                 }
             }
         }
-        let entry = tgm.inner.entry(code);
-        let gt = entry.or_insert(GroupCounter::new());
-        if let Some((group, _)) = mg {
+        if let Some((group, gc, _)) = mg.take() {
             self.discount(&group);
-            gt[&group.0] += 1;
+            let mut gc = gc.clone();
+            gc[&group.0] += 1;
+            // assert!(!tgm.inner.contains_key(&code), "{:?}", Self::decode(code));
+            tgm.inner.insert(code, gc);
+        } else {
+            tgm.inner.insert(code, GroupCounter::new());
         }
     }
 
@@ -327,20 +347,25 @@ impl<const L: usize> TileCounter<L> {
     }
 }
 
-// pub struct SuhaiCounter(TileCounter<MAX_SUHAI_NUM>);
-// pub struct WindCounter(TileCounter<MAX_JIHAI_NUM>);
-
 impl TileGroupMap {
     fn empty() -> Self {
         let mut inner = BTreeMap::new();
         inner.insert(0, GroupCounter::new());
         TileGroupMap { inner }
     }
+}
 
-    pub fn new<const L: usize>(complete_gts: &[GroupType], impcomplete_gts: &[GroupType]) -> Self {
-        let mut this = Self::empty();
+pub struct TileGroupData {
+    pub compl_map: TileGroupMap,
+    pub imcmp_map: TileGroupMap,
+}
 
-        for n in 0..=MAX_NUM_HAND_TILES {
+impl TileGroupData {
+    fn new<const L: usize>(complete_gts: &[GroupType], impcomplete_gts: &[GroupType]) -> Self {
+        let mut compl_map = TileGroupMap::empty();
+        let mut imcmp_map = TileGroupMap::empty();
+
+        for n in 0..=6 {
             for comb in all_possible_nums(n, L) {
                 let mut m = L;
                 let (ks, iters): (Vec<_>, Vec<_>) = comb
@@ -354,13 +379,30 @@ impl TileGroupMap {
 
                 for jss in iters.into_iter().multi_cartesian_product() {
                     let mut counter = TileCounter::<L>::new(jss, &ks);
-                    counter.update_group_count(complete_gts, &mut this);
-                    counter.update_group_count(impcomplete_gts, &mut this);
+                    counter.insert_group_count(complete_gts, &mut compl_map);
+                    counter.insert_group_count(impcomplete_gts, &mut imcmp_map);
                 }
             }
         }
-        this
+        Self {
+            compl_map,
+            imcmp_map,
+        }
     }
+}
+
+pub type NumberTileCounter = TileCounter<NUM_NUMBER_TILES>;
+pub type CharTileCounter = TileCounter<NUM_CHAR_TILES>;
+
+pub fn number_tiles_data() -> TileGroupData {
+    TileGroupData::new::<NUM_NUMBER_TILES>(
+        &[GroupType::Triple, GroupType::Sequence],
+        &[GroupType::Double, GroupType::Skip, GroupType::Neighbor],
+    )
+}
+
+pub fn char_tiles_data() -> TileGroupData {
+    TileGroupData::new::<NUM_CHAR_TILES>(&[GroupType::Triple], &[GroupType::Double])
 }
 
 // def find_kohtsu_patterns(g: list[int]) -> list[int]:

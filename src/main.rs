@@ -1,3 +1,5 @@
+use mahjong_sim::{NumberTileCounter, number_tiles_data};
+
 use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
@@ -154,17 +156,22 @@ fn parse(tiles: Vec<Tile>) -> Vec<Vec<Group>> {
 }
 
 fn main() {
-    let mut stack = make_stack(1);
-    let mut hand = Hand {
-        closed: stack.drain(0..13).collect(),
-        opened: vec![],
-    };
-    hand.closed.sort();
+    // let mut stack = make_stack(1);
+    // let mut hand = Hand {
+    //     closed: stack.drain(0..13).collect(),
+    //     opened: vec![],
+    // };
+    // hand.closed.sort();
 
-    for t in &hand.closed {
-        print!("{} ", t);
+    // for t in &hand.closed {
+    //     print!("{} ", t);
+    // }
+    // println!("{:?}", hand.closed);
+
+    // println!("{}", std::mem::size_of::<&Tile>());
+    let data = number_tiles_data();
+    for (code, gc) in &data.compl_map {
+        let counter = NumberTileCounter::decode(*code);
+        println!("{:?}, {:?}", counter, gc);
     }
-    println!("{:?}", hand.closed);
-
-    println!("{}", std::mem::size_of::<&Tile>());
 }
