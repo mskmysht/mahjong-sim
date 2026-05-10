@@ -1,2 +1,3 @@
 [workspace]
-members = ["util"]
+members = ["util", "web"]
+resolver = "3"
