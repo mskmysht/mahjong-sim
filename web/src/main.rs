@@ -19,7 +19,7 @@ fn app() -> Html {
         use_effect_with((), move |_| {
             let records = records.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let fetched_csv: String = Request::get("/assets/data.csv")
+                let fetched_csv: String = Request::get("./assets/data.csv")
                     .send()
                     .await
                     .unwrap()
