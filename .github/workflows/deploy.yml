@@ -12,20 +12,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
       - name: Install Rust
         run: rustup update stable && rustup target add wasm32-unknown-unknown
 
       - name: Install Trunk
-        uses: jetli/trunk-action@v0.4.0
+        uses: jetli/trunk-action@v0.5.1
 
       - name: Build with Trunk
         run: trunk build --release --public-url /mahjong-sim/
         working-directory: ./web
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./web/dist
 
