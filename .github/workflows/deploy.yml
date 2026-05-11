@@ -17,8 +17,13 @@ jobs:
       - name: Install Rust
         run: rustup update stable && rustup target add wasm32-unknown-unknown
 
-      - name: Install Trunk
-        uses: jetli/trunk-action@v0.5.1
+      # - name: Install Trunk
+      #   uses: jetli/trunk-action@v0.5.1
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Trunk via binstall
+        run: cargo binstall trunk -y
 
       - name: Build with Trunk
         run: trunk build --release --public-url /mahjong-sim/
@@ -38,4 +43,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
