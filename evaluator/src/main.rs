@@ -1,4 +1,4 @@
-use mahjong_sim::{NumberTileCounter, number_tiles_data};
+use evaluator::{NumberTileCounter, number_tiles_data};
 
 use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 
@@ -170,8 +170,7 @@ fn main() {
 
     // println!("{}", std::mem::size_of::<&Tile>());
     let data = number_tiles_data();
-    for (code, gc) in &data.compl_map {
-        let counter = NumberTileCounter::decode(*code);
-        println!("{:?}, {:?}", counter, gc);
-    }
+    let (edges, counters) = data.convert();
+    util::print(edges.into_iter(), "web/assets/edges.csv").unwrap();
+    util::print(counters.into_iter(), "web/assets/counters.csv").unwrap();
 }
