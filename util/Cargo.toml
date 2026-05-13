@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 csv = { workspace = true }
-serde = { workspace = true }
+rkyv = { workspace = true }

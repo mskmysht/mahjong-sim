@@ -1,4 +1,4 @@
-use evaluator::{NumberTileCounter, number_tiles_data};
+use evaluator::{export_tile_data, number_tiles_data};
 
 use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 
@@ -170,7 +170,5 @@ fn main() {
 
     // println!("{}", std::mem::size_of::<&Tile>());
     let data = number_tiles_data();
-    let (edges, counters) = data.convert();
-    util::print(edges.into_iter(), "web/assets/edges.csv").unwrap();
-    util::print(counters.into_iter(), "web/assets/counters.csv").unwrap();
+    export_tile_data(data).unwrap();
 }

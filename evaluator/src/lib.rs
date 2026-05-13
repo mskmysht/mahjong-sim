@@ -1,9 +1,13 @@
 use std::{
     collections::BTreeMap,
+    fs::{self, File},
+    io::{self, Write},
     ops::{Index, IndexMut},
+    path::Path,
 };
 
 use itertools::Itertools;
+use rkyv::rancor::Error;
 
 const CODE_RADIX: u32 = 5;
 const MAX_NUM_HAND_TILES: usize = 14;
@@ -358,29 +362,6 @@ impl TileGroupData {
             imcmp_map,
         }
     }
-
-    pub fn convert(self) -> (Vec<util::Edge>, Vec<util::Counter>) {
-        let mut edges = Vec::new();
-        let mut counters = Vec::new();
-
-        for (v, ws) in &self.compl_map.succs {
-            for w in ws {
-                edges.push(util::Edge::new(*v, *w));
-            }
-        }
-        for (v, counter) in &self.compl_map.counter {
-            counters.push(util::Counter::new(
-                *v,
-                counter[&GroupType::Triple],
-                counter[&GroupType::Sequence],
-                counter[&GroupType::Neighbor],
-                counter[&GroupType::Skip],
-                counter[&GroupType::Double],
-            ));
-        }
-
-        (edges, counters)
-    }
 }
 
 pub type NumberTileCounter = TileCounter<NUM_NUMBER_TILES>;
@@ -396,4 +377,38 @@ pub fn number_tiles_data() -> TileGroupData {
 
 pub fn char_tiles_data() -> TileGroupData {
     TileGroupData::new::<NUM_CHAR_TILES>(6, &[GroupType::Triple], &[GroupType::Double])
+}
+
+pub fn export_tile_data(mut data: TileGroupData) -> Result<(), Box<dyn std::error::Error>> {
+    let mut shards: BTreeMap<u32, util::ShardMap> = BTreeMap::new();
+    for (id, gc) in data.compl_map.counter {
+        let shard_id = id / util::NUM_SHARD;
+        let shard = shards.entry(shard_id).or_default();
+        let label = "";
+        shard.nodes.insert(
+            id,
+            util::Node::new(
+                data.compl_map.preds.remove(&id).unwrap_or_default(),
+                data.compl_map.succs.remove(&id).unwrap_or_default(),
+                label.to_string(),
+                util::NodeData::new(
+                    gc[&GroupType::Triple],
+                    gc[&GroupType::Sequence],
+                    gc[&GroupType::Neighbor],
+                    gc[&GroupType::Skip],
+                    gc[&GroupType::Double],
+                ),
+            ),
+        );
+    }
+
+    let dir = Path::new("web/assets/shards");
+    fs::create_dir_all(&dir)?;
+    for (shard_id, shard) in shards {
+        let bytes = rkyv::to_bytes::<Error>(&shard)?;
+        let mut file = File::create(dir.join(format!("shard_{}.bin", shard_id)))?;
+        file.write_all(&bytes)?;
+    }
+
+    Ok(())
 }

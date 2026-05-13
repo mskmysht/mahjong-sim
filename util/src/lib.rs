@@ -1,26 +1,28 @@
-use std::{fs::File, io};
+use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 
-pub fn main() {
-    println!("Hello, world!");
+#[derive(Debug, Archive, Serialize, Deserialize)]
+pub struct Node {
+    pub from: Vec<u32>,
+    pub to: Vec<u32>,
+    pub label: String,
+    pub data: NodeData,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Edge {
-    from: u32,
-    to: u32,
-}
-
-impl Edge {
-    pub fn new(from: u32, to: u32) -> Self {
-        Self { from, to }
+impl Node {
+    pub fn new(from: Vec<u32>, to: Vec<u32>, label: String, data: NodeData) -> Self {
+        Self {
+            from,
+            to,
+            label,
+            data,
+        }
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Counter {
-    id: u32,
+#[derive(Debug, Archive, Serialize, Deserialize)]
+pub struct NodeData {
     triple: u32,
     sequence: u32,
     neighbor: u32,
@@ -28,10 +30,9 @@ pub struct Counter {
     double: u32,
 }
 
-impl Counter {
-    pub fn new(id: u32, triple: u32, sequence: u32, neighbor: u32, skip: u32, double: u32) -> Self {
+impl NodeData {
+    pub fn new(triple: u32, sequence: u32, neighbor: u32, skip: u32, double: u32) -> Self {
         Self {
-            id,
             triple,
             sequence,
             neighbor,
@@ -41,11 +42,9 @@ impl Counter {
     }
 }
 
-pub fn print<V: Serialize>(records: impl Iterator<Item = V>, path: &str) -> Result<(), io::Error> {
-    let mut wtr = csv::Writer::from_writer(File::create(path)?);
-    for record in records {
-        wtr.serialize(record)?;
-    }
-    wtr.flush()?;
-    Ok(())
+#[derive(Debug, Archive, Serialize, Deserialize, Default)]
+pub struct ShardMap {
+    pub nodes: BTreeMap<u32, Node>,
 }
+
+pub const NUM_SHARD: u32 = 15625;
