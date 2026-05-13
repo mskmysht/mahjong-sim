@@ -229,62 +229,6 @@ impl<const L: usize> TileCounter<L> {
         p
     }
 
-    // fn discount_by(&mut self, other: &Self) {
-    //     for i in 0..L {
-    //         self.0[i] -= other.0[i];
-    //     }
-    // }
-
-    // fn discount(&mut self, Group(gt, i): &Group) {
-    //     let i = *i;
-    //     match gt {
-    //         GroupType::Triple => {
-    //             self.0[i] -= 3;
-    //         }
-    //         GroupType::Double => {
-    //             self.0[i] -= 2;
-    //         }
-    //         GroupType::Skip => {
-    //             self.0[i] -= 1;
-    //             self.0[i + 2] -= 1;
-    //         }
-    //         GroupType::Neighbor => {
-    //             self.0[i] -= 1;
-    //             self.0[i + 1] -= 1;
-    //         }
-    //         GroupType::Sequence => {
-    //             self.0[i] -= 1;
-    //             self.0[i + 1] -= 1;
-    //             self.0[i + 2] -= 1;
-    //         }
-    //     }
-    // }
-
-    // fn count(&mut self, Group(gt, i): &Group) {
-    //     let i = *i;
-    //     match gt {
-    //         GroupType::Triple => {
-    //             self.0[i] += 3;
-    //         }
-    //         GroupType::Double => {
-    //             self.0[i] += 2;
-    //         }
-    //         GroupType::Skip => {
-    //             self.0[i] += 1;
-    //             self.0[i + 2] += 1;
-    //         }
-    //         GroupType::Neighbor => {
-    //             self.0[i] += 1;
-    //             self.0[i + 1] += 1;
-    //         }
-    //         GroupType::Sequence => {
-    //             self.0[i] += 1;
-    //             self.0[i + 1] += 1;
-    //             self.0[i + 2] += 1;
-    //         }
-    //     }
-    // }
-
     fn find_opt_group(
         &self,
         target_gts: &[GroupType],
@@ -357,12 +301,12 @@ impl TileGroupMap {
         }
     }
 
-    fn update(&mut self, code: u32, next: u32, next_group: Group) {
-        let mut gc = self.counter[&next].clone();
-        gc[&next_group.0] += 1;
+    fn update(&mut self, code: u32, prev: u32, prev_group: Group) {
+        let mut gc = self.counter[&prev].clone();
+        gc[&prev_group.0] += 1;
         self.counter.insert(code, gc);
-        self.succs.entry(code).or_default().push(next);
-        self.preds.entry(next).or_default().push(code);
+        self.preds.entry(code).or_default().push(prev);
+        self.succs.entry(prev).or_default().push(code);
     }
 }
 
@@ -395,14 +339,14 @@ impl TileGroupData {
                 for jss in iters.into_iter().multi_cartesian_product() {
                     let counter = TileCounter::<L>::from_comb(jss, &ks);
                     let code = counter.encode();
-                    if let Some((next_group, _, next, _)) =
+                    if let Some((prev_group, _, prev, _)) =
                         counter.find_opt_group(complete_gts, &compl_map)
                     {
-                        compl_map.update(code, next, next_group);
-                    } else if let Some((next_group, _, next, _)) =
+                        compl_map.update(code, prev, prev_group);
+                    } else if let Some((prev_group, _, prev, _)) =
                         counter.find_opt_group(impcomplete_gts, &compl_map)
                     {
-                        compl_map.update(code, next, next_group);
+                        compl_map.update(code, prev, prev_group);
                     } else {
                         compl_map.counter.insert(code, GroupCounter::new());
                     }
