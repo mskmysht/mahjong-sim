@@ -76,7 +76,7 @@ pub fn app() -> Html {
             // すでにバイトデータを持っていない場合のみFetch
             if !state.shard_bytes.contains_key(&shard_id) {
                 wasm_bindgen_futures::spawn_local(async move {
-                    let url = format!("/assets/shards/shard_{}.bin", shard_id);
+                    let url = format!("./assets/shards/shard_{}.bin", shard_id);
                     if let Ok(response) = Request::get(&url).send().await {
                         if let Ok(bytes) = response.binary().await {
                             let mut new_state = (*state).clone();
@@ -207,7 +207,7 @@ pub fn tree_node(props: &Props) -> Html {
                 if !has_bytes {
                     // バイトデータがまだ無い場合のみHTTPリクエスト
                     wasm_bindgen_futures::spawn_local(async move {
-                        let url = format!("/assets/shards/shard_{}.bin", shard_id);
+                        let url = format!("./assets/shards/shard_{}.bin", shard_id);
                         if let Ok(response) = Request::get(&url).send().await {
                             if let Ok(bytes) = response.binary().await {
                                 let mut updated_state = (*state).clone();
