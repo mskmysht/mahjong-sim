@@ -63,24 +63,20 @@ pub fn app() -> Html {
     let state = use_state(AppState::default);
 
     // ユーザーが入力を確定したターゲットID（初期値として仮に 15626 を設定）
-    let target_id = use_state(|| 15626_u32);
+    let target_id = use_state(|| 1_u32);
     let input_value = use_state(String::new); // テキストボックスの入力管理
-
-    // 5進数の性質を活かしたシャードサイズ（125分割プラン: 5^6 = 15625）
-    // 25分割プランの場合は 78125 に変更してください
-    let shard_size = 15625_u32;
 
     // 入力IDが変更されたとき、必要なシャードを自動でプリロードする副作用（Effect）
     {
         let state = state.clone();
         let target_id = *target_id;
         use_effect_with(target_id, move |_| {
-            let shard_id = target_id / shard_size;
+            let shard_id = target_id / NUM_SHARD;
 
             // すでにバイトデータを持っていない場合のみFetch
             if !state.shard_bytes.contains_key(&shard_id) {
                 wasm_bindgen_futures::spawn_local(async move {
-                    let url = format!("/data/shards/shard_{}.bin", shard_id);
+                    let url = format!("/assets/shards/shard_{}.bin", shard_id);
                     if let Ok(response) = Request::get(&url).send().await {
                         if let Ok(bytes) = response.binary().await {
                             let mut new_state = (*state).clone();
@@ -211,7 +207,7 @@ pub fn tree_node(props: &Props) -> Html {
                 if !has_bytes {
                     // バイトデータがまだ無い場合のみHTTPリクエスト
                     wasm_bindgen_futures::spawn_local(async move {
-                        let url = format!("/data/shards/shard_{}.bin", shard_id);
+                        let url = format!("/assets/shards/shard_{}.bin", shard_id);
                         if let Ok(response) = Request::get(&url).send().await {
                             if let Ok(bytes) = response.binary().await {
                                 let mut updated_state = (*state).clone();
