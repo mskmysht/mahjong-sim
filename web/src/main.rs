@@ -14,7 +14,8 @@ pub struct AppState {
 }
 
 fn main() {
-    yew::Renderer::<App>::new().render();
+    // yew::Renderer::<App>::new().render();
+    yew::Renderer::<web::App>::new().render();
 }
 
 // fn app() -> Html {

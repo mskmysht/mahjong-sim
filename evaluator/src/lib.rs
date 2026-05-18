@@ -1,13 +1,16 @@
 use std::{
     collections::BTreeMap,
     fs::{self, File},
-    io::{self, Write},
+    io::Write,
     ops::{Index, IndexMut},
-    path::Path,
+    path::PathBuf,
 };
 
 use itertools::Itertools;
-use rkyv::rancor::Error;
+use rkyv::{
+    Serialize, api::high::HighSerializer, rancor::Error, ser::allocator::ArenaHandle,
+    util::AlignedVec,
+};
 
 const CODE_RADIX: u32 = 5;
 const MAX_NUM_HAND_TILES: usize = 14;
@@ -367,9 +370,9 @@ impl TileGroupData {
 pub type NumberTileCounter = TileCounter<NUM_NUMBER_TILES>;
 pub type CharTileCounter = TileCounter<NUM_CHAR_TILES>;
 
-pub fn number_tiles_data() -> TileGroupData {
+pub fn number_tiles_data(num_tiles: usize) -> TileGroupData {
     TileGroupData::new::<NUM_NUMBER_TILES>(
-        6,
+        num_tiles,
         &[GroupType::Triple, GroupType::Sequence],
         &[GroupType::Double, GroupType::Skip, GroupType::Neighbor],
     )
@@ -379,32 +382,66 @@ pub fn char_tiles_data() -> TileGroupData {
     TileGroupData::new::<NUM_CHAR_TILES>(6, &[GroupType::Triple], &[GroupType::Double])
 }
 
-pub fn export_tile_data(mut data: TileGroupData) -> Result<(), Box<dyn std::error::Error>> {
-    let mut shards: BTreeMap<u32, util::ShardMap> = BTreeMap::new();
-    for (id, gc) in data.compl_map.counter {
-        let shard_id = id / util::NUM_SHARD;
-        let shard = shards.entry(shard_id).or_default();
-        let label = "";
-        shard.nodes.insert(
-            id,
-            util::Node::new(
-                data.compl_map.preds.remove(&id).unwrap_or_default(),
-                data.compl_map.succs.remove(&id).unwrap_or_default(),
-                label.to_string(),
-                util::NodeData::new(
+impl From<TileGroupData> for BTreeMap<u32, util::ShardMap> {
+    fn from(mut value: TileGroupData) -> Self {
+        let mut shards: BTreeMap<u32, util::ShardMap> = BTreeMap::new();
+        for (id, gc) in value.compl_map.counter {
+            let shard_id = id / util::NUM_SHARD;
+            let shard = shards.entry(shard_id).or_default();
+            let label = "".to_string();
+            shard.nodes.insert(
+                id,
+                util::Node::new(
+                    value.compl_map.preds.remove(&id).unwrap_or_default(),
+                    value.compl_map.succs.remove(&id).unwrap_or_default(),
+                    label,
+                    util::NodeData::new(
+                        gc[&GroupType::Triple],
+                        gc[&GroupType::Sequence],
+                        gc[&GroupType::Neighbor],
+                        gc[&GroupType::Skip],
+                        gc[&GroupType::Double],
+                    ),
+                ),
+            );
+        }
+        shards
+    }
+}
+
+impl From<TileGroupData> for BTreeMap<u32, Vec<util::NodeRecord>> {
+    fn from(mut value: TileGroupData) -> Self {
+        let mut shard_map: BTreeMap<u32, Vec<util::NodeRecord>> = BTreeMap::new();
+        for (id, gc) in value.compl_map.counter {
+            let shard_id = id / util::SHARD_SIZE;
+            let recs = shard_map.entry(shard_id).or_default();
+            let label = "".to_string();
+            recs.push(util::NodeRecord {
+                id,
+                label,
+                data: util::NodeData::new(
                     gc[&GroupType::Triple],
                     gc[&GroupType::Sequence],
                     gc[&GroupType::Neighbor],
                     gc[&GroupType::Skip],
                     gc[&GroupType::Double],
                 ),
-            ),
-        );
+                successors: value.compl_map.succs.remove(&id).unwrap_or_default(),
+                predecessors: value.compl_map.preds.remove(&id).unwrap_or_default(),
+            });
+        }
+        shard_map
     }
+}
 
-    let dir = Path::new("web/assets/shards");
+pub fn export_tile_data<T>(data: TileGroupData, dir: &str) -> Result<(), Box<dyn std::error::Error>>
+where
+    TileGroupData: Into<BTreeMap<u32, T>>,
+    for<'a> T: Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, Error>>,
+{
+    let dir = PathBuf::from(dir);
     fs::create_dir_all(&dir)?;
-    for (shard_id, shard) in shards {
+    for (shard_id, shard) in data.into() {
         let bytes = rkyv::to_bytes::<Error>(&shard)?;
         let mut file = File::create(dir.join(format!("shard_{}.bin", shard_id)))?;
         file.write_all(&bytes)?;

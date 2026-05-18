@@ -21,7 +21,7 @@ impl Node {
     }
 }
 
-#[derive(Debug, Archive, Serialize, Deserialize)]
+#[derive(Clone, Debug, Archive, Serialize, Deserialize, PartialEq)]
 pub struct NodeData {
     triple: u32,
     sequence: u32,
@@ -48,3 +48,18 @@ pub struct ShardMap {
 }
 
 pub const NUM_SHARD: u32 = 15625;
+
+#[derive(Clone, Debug, PartialEq, Archive, Serialize, Deserialize)]
+pub struct NodeRecord {
+    pub id: u32,
+    pub label: String,
+    pub data: NodeData,
+    // pub value_a: u32, // 仮名: 後で変更
+    // pub value_b: u32, // 仮名: 後で変更
+    // pub value_c: u32, // 仮名: 後で変更
+    pub predecessors: Vec<u32>,
+    pub successors: Vec<u32>,
+}
+
+pub const SHARD_SIZE: u32 = 15_625;
+pub const TOTAL_NODES: u32 = 405_348;

@@ -29,6 +29,9 @@ jobs:
         run: trunk build --release --public-url /mahjong-sim/
         working-directory: ./web
 
+      - name: Generate data
+        run: cargo run -p evaluator -- 2 ./web/assets/shards
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:
