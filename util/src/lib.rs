@@ -23,11 +23,11 @@ impl Node {
 
 #[derive(Clone, Debug, Archive, Serialize, Deserialize, PartialEq)]
 pub struct NodeData {
-    triple: u32,
-    sequence: u32,
-    neighbor: u32,
-    skip: u32,
-    double: u32,
+    pub triple: u32,
+    pub sequence: u32,
+    pub neighbor: u32,
+    pub skip: u32,
+    pub double: u32,
 }
 
 impl NodeData {
@@ -39,6 +39,13 @@ impl NodeData {
             skip,
             double,
         }
+    }
+
+    fn text(&self) -> String {
+        format!(
+            "{} {} {} {} {}",
+            self.sequence, self.triple, self.double, self.neighbor, self.skip,
+        )
     }
 }
 
@@ -63,3 +70,17 @@ pub struct NodeRecord {
 
 pub const SHARD_SIZE: u32 = 15_625;
 pub const TOTAL_NODES: u32 = 405_348;
+
+impl NodeRecord {
+    /// 補足情報の件数（記号+値の横一列アイテム数）。
+    /// フィールドを追加した場合はここを変更すること。
+    pub fn info_item_count(&self) -> usize {
+        3 // value_a, value_b, value_c
+    }
+
+    /// 補足情報の表示文字列。
+    /// フィールドを追加した場合はここを変更すること。
+    pub fn info_text(&self) -> String {
+        self.data.text()
+    }
+}

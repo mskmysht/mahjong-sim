@@ -1270,6 +1270,7 @@ dependencies = [
  "gloo-net 0.7.0",
  "rkyv",
  "util",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "yew",

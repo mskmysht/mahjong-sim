@@ -26,7 +26,7 @@ jobs:
         run: cargo binstall trunk -y
 
       - name: Generate data
-        run: cargo run -p evaluator -- 2 ./web/assets/shards
+        run: cargo run -p evaluator -- 6 ./web/assets/shards
 
       - name: Build with Trunk
         run: trunk build --release --public-url /mahjong-sim/
