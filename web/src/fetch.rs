@@ -42,16 +42,9 @@ pub fn shard_url(idx: u32) -> String {
 // ---------------------------------------------------------------------------
 
 /// シャードバイト列を Vec<NodeRecord> にデシリアライズする。
-///
-/// # 本番実装
-/// ```rust
-/// rkyv::from_bytes::<Vec<NodeRecord>, rkyv::rancor::Error>(bytes)
-///     .map_err(|e| format!("rkyv error: {e}"))
-/// ```
 pub fn deserialize_shard(bytes: &[u8]) -> Result<Vec<NodeRecord>, String> {
-    // --- プレースホルダ ---
-    let _ = bytes;
-    Ok(vec![])
+    rkyv::from_bytes::<Vec<NodeRecord>, rkyv::rancor::Error>(bytes)
+        .map_err(|e| format!("rkyv error: {e}"))
 }
 
 // ---------------------------------------------------------------------------
