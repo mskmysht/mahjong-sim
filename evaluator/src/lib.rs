@@ -428,7 +428,7 @@ impl From<TileGroupData> for BTreeMap<u32, Vec<util::NodeRecord>> {
         for (id, gc) in value.compl_map.counter {
             let shard_id = id / util::SHARD_SIZE;
             let recs = shard_map.entry(shard_id).or_default();
-            let label = "".to_string();
+            let label = decode_to_tile_vec(id).iter().join(",");
             recs.push(util::NodeRecord {
                 id,
                 label,
