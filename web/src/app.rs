@@ -16,12 +16,12 @@ use yew::prelude::*;
 
 use crate::canvas::draw_canvas;
 use crate::fetch::{
-    SHARD_SIZE, TOTAL_NODES, deserialize_shard, fetch_adjacent, fetch_shard, find_in_cache,
-    shard_index,
+    SHARD_SIZE, TOTAL_NODES, cached_records, deserialize_shard, fetch_adjacent, fetch_shard,
+    find_in_cache, shard_index,
 };
 use crate::layout::{HEADER_H, Layout, POPUP_SCALE_THRESHOLD, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 use crate::styles::STYLES;
-use crate::types::{ExpandDir, HoverTarget, Msg};
+use crate::types::{HoverTarget, Msg};
 
 use util::NodeRecord;
 
@@ -36,7 +36,7 @@ pub struct App {
 
     // 表示中の局所グラフ
     pub root_id: Option<u32>,
-    pub expand_dir: ExpandDir,
+    // pub expand_dir: ExpandDir,
     pub layout: Layout,
 
     // シャードキャッシュ: shard_index → Vec<NodeRecord>
@@ -66,7 +66,7 @@ impl Default for App {
             input: String::new(),
             root_error: None,
             root_id: None,
-            expand_dir: ExpandDir::default(),
+            // expand_dir: ExpandDir::default(),
             layout: Layout::default(),
             cache: HashMap::new(),
             fetching: HashSet::new(),
@@ -131,8 +131,8 @@ impl App {
             Some(r) => r,
             None => return,
         };
-        let dir = self.expand_dir;
-        self.layout = Layout::from_cache(root, dir, |id| self.find_cloned(id));
+        // let dir = self.expand_dir;
+        self.layout = Layout::from_cache(root, |id| self.find_cloned(id));
     }
 
     /// Canvas を再描画する。
@@ -214,7 +214,7 @@ impl Component for App {
                 }
                 self.root_error = None;
                 self.root_id = Some(node_id);
-                self.expand_dir = ExpandDir::Both;
+                // self.expand_dir = ExpandDir::Both;
                 self.pan_x = 0.0;
                 self.pan_y = 0.0;
                 self.scale = 1.0;
@@ -233,18 +233,17 @@ impl Component for App {
 
             // ----------------------------------------------------------------
             Msg::ExpandUp(node_id) => {
-                self.root_id = Some(node_id);
-                self.expand_dir = ExpandDir::Up;
                 self.hover = None;
 
                 if let Some(root) = self.find_cloned(node_id) {
                     fetch_adjacent(
                         ctx.link(),
-                        &root.predecessors.clone(),
+                        &root.predecessors,
                         &mut self.fetching,
                         &self.cache,
                     );
-                    self.rebuild_layout();
+                    let adj_records = cached_records(&root.predecessors, &self.cache);
+                    self.layout.append(node_id, false, adj_records);
                     self.redraw();
                 } else if !self.fetching.contains(&node_id) {
                     self.fetching.insert(node_id);
@@ -255,18 +254,17 @@ impl Component for App {
 
             // ----------------------------------------------------------------
             Msg::ExpandDown(node_id) => {
-                self.root_id = Some(node_id);
-                self.expand_dir = ExpandDir::Down;
                 self.hover = None;
 
                 if let Some(root) = self.find_cloned(node_id) {
                     fetch_adjacent(
                         ctx.link(),
-                        &root.successors.clone(),
+                        &root.successors,
                         &mut self.fetching,
                         &self.cache,
                     );
-                    self.rebuild_layout();
+                    let adj_records = cached_records(&root.successors, &self.cache);
+                    self.layout.append(node_id, false, adj_records);
                     self.redraw();
                 } else if !self.fetching.contains(&node_id) {
                     self.fetching.insert(node_id);
@@ -368,17 +366,24 @@ impl Component for App {
                         self.cache.insert(shard_idx, records);
 
                         if let Some(root_id) = self.root_id {
-                            // 隣接ノードの未フェッチシャードを追加フェッチ
-                            if let Some(root) = self.find_cloned(root_id) {
-                                let adj: Vec<u32> = root
-                                    .predecessors
-                                    .iter()
-                                    .chain(root.successors.iter())
-                                    .copied()
-                                    .collect();
-                                fetch_adjacent(ctx.link(), &adj, &mut self.fetching, &self.cache);
+                            if self.layout.nodes.is_empty() {
+                                // 隣接ノードの未フェッチシャードを追加フェッチ
+                                if let Some(root) = self.find_cloned(root_id) {
+                                    let adj: Vec<u32> = root
+                                        .predecessors
+                                        .iter()
+                                        .chain(root.successors.iter())
+                                        .copied()
+                                        .collect();
+                                    fetch_adjacent(
+                                        ctx.link(),
+                                        &adj,
+                                        &mut self.fetching,
+                                        &self.cache,
+                                    );
+                                    self.rebuild_layout();
+                                }
                             }
-                            self.rebuild_layout();
                             self.redraw();
                         }
                     }

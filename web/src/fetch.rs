@@ -117,3 +117,11 @@ pub fn find_in_cache<'a>(
         .iter()
         .find(|r| r.id == node_id)
 }
+
+/// キャッシュ済みのレコードの参照をイテレータで返す
+pub fn cached_records<'a>(
+    adj_ids: &'a [u32],
+    cache: &'a HashMap<u32, Vec<NodeRecord>>,
+) -> impl Iterator<Item = &'a NodeRecord> + 'a {
+    adj_ids.iter().filter_map(|&id| find_in_cache(cache, id))
+}

@@ -34,6 +34,19 @@ fn decode_to_tile_nums<const L: usize>(mut code: u32) -> [u8; L] {
     nums
 }
 
+fn decode_to_tile_vec(mut code: u32) -> Vec<u32> {
+    let mut tiles = Vec::new();
+    let mut i = 0;
+    while code > 0 {
+        for _ in 0..(code % CODE_RADIX) {
+            tiles.push(i);
+        }
+        code /= CODE_RADIX;
+        i += 1;
+    }
+    tiles
+}
+
 #[allow(dead_code)]
 fn rec_all_possible_nums(num_tiles: usize, num_tile_kinds: usize) -> Vec<Vec<(u8, usize)>> {
     assert!(num_tiles <= MAX_NUM_HAND_TILES);
@@ -388,7 +401,7 @@ impl From<TileGroupData> for BTreeMap<u32, util::ShardMap> {
         for (id, gc) in value.compl_map.counter {
             let shard_id = id / util::NUM_SHARD;
             let shard = shards.entry(shard_id).or_default();
-            let label = "".to_string();
+            let label = decode_to_tile_vec(id).iter().join(",");
             shard.nodes.insert(
                 id,
                 util::Node::new(

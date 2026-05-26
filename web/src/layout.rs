@@ -9,7 +9,7 @@
 //   - GraphNode に座標ヘルパを追加するとき
 // =============================================================================
 
-use crate::types::ExpandDir;
+// use crate::types::ExpandDir;
 use util::NodeRecord;
 
 // ---------------------------------------------------------------------------
@@ -97,6 +97,7 @@ impl GraphNode {
     pub fn cx(&self) -> f64 {
         self.x + self.width() / 2.0
     }
+    #[allow(unused)]
     pub fn cy(&self) -> f64 {
         self.y + NODE_H / 2.0
     }
@@ -229,27 +230,78 @@ impl Layout {
         Self { nodes, edges }
     }
 
+    /// 既存レイアウトに、node_id を起点とした 1 ホップを追記する。
+    /// is_up=true で先行方向、false で後継方向。
+    /// adj_records は呼び出し元のキャッシュへの参照イテレータ。
+    /// clone は GraphNode 生成が確定した時点でのみ発生する。
+    pub fn append<'a>(
+        &mut self,
+        node_id: u32,
+        is_up: bool,
+        adj_records: impl Iterator<Item = &'a NodeRecord>,
+    ) {
+        // 起点ノードが Layout 上に存在しなければ何もしない
+        let anchor_idx = match self.nodes.iter().position(|n| n.record.id == node_id) {
+            Some(i) => i,
+            None => return,
+        };
+
+        // 重複チェックは参照のまま行う（clone はしない）
+        let new_records: Vec<&NodeRecord> = adj_records
+            .filter(|r| !self.nodes.iter().any(|n| n.record.id == r.id))
+            .collect();
+
+        if new_records.is_empty() {
+            return;
+        }
+
+        // 新規ノード群の合計幅
+        let total_w: f64 = {
+            let w_sum: f64 = new_records
+                .iter()
+                .map(|r| {
+                    let info_w = INFO_ITEM_W * r.info_item_count() as f64;
+                    (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
+                })
+                .sum();
+            w_sum + H_GAP * (new_records.len() as f64 - 1.0)
+        };
+
+        // 起点ノードの中央 x に揃えて配置
+        let anchor_cx = self.nodes[anchor_idx].cx();
+        let anchor_y = self.nodes[anchor_idx].y;
+        let new_y = if is_up {
+            anchor_y - NODE_H - V_GAP - HANDLE_H * 2.0
+        } else {
+            anchor_y + NODE_H + V_GAP + HANDLE_H * 2.0
+        };
+        let mut nx = anchor_cx - total_w / 2.0;
+
+        // ここで初めて clone が発生する（追加確定したノードのみ）
+        for record in new_records {
+            let w = {
+                let info_w = INFO_ITEM_W * record.info_item_count() as f64;
+                (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
+            };
+            if is_up {
+                self.edges.push((record.id, node_id));
+            } else {
+                self.edges.push((node_id, record.id));
+            }
+            self.nodes.push(GraphNode::new(record.clone(), nx, new_y));
+            nx += w + H_GAP;
+        }
+    }
+
     /// キャッシュ済みノード群と展開方向から `Layout` を構築するファクトリ。
     /// `App::rebuild_layout` から呼ばれる。
-    pub fn from_cache(
-        root: NodeRecord,
-        expand_dir: ExpandDir,
-        find: impl Fn(u32) -> Option<NodeRecord>,
-    ) -> Self {
-        let preds = match expand_dir {
-            ExpandDir::Up | ExpandDir::Both => root
-                .predecessors
-                .iter()
-                .filter_map(|&id| find(id))
-                .collect(),
-            ExpandDir::Down => vec![],
-        };
-        let succs = match expand_dir {
-            ExpandDir::Down | ExpandDir::Both => {
-                root.successors.iter().filter_map(|&id| find(id)).collect()
-            }
-            ExpandDir::Up => vec![],
-        };
+    pub fn from_cache(root: NodeRecord, find: impl Fn(u32) -> Option<NodeRecord>) -> Self {
+        let preds = root
+            .predecessors
+            .iter()
+            .filter_map(|&id| find(id))
+            .collect();
+        let succs = root.successors.iter().filter_map(|&id| find(id)).collect();
         Self::new(root, preds, succs)
     }
 }

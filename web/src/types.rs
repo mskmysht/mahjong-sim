@@ -29,13 +29,13 @@ pub enum HoverTarget {
 // 展開方向
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Default)]
-pub enum ExpandDir {
-    Up,
-    Down,
-    #[default]
-    Both,
-}
+// #[derive(Clone, Copy, PartialEq, Default)]
+// pub enum ExpandDir {
+//     Up,
+//     Down,
+//     #[default]
+//     Both,
+// }
 
 // ---------------------------------------------------------------------------
 // Yew メッセージ
