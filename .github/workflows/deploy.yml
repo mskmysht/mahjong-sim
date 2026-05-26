@@ -17,8 +17,6 @@ jobs:
       - name: Install Rust
         run: rustup update stable && rustup target add wasm32-unknown-unknown
 
-      # - name: Install Trunk
-      #   uses: jetli/trunk-action@v0.5.1
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
 
