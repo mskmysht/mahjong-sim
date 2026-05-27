@@ -6,302 +6,222 @@
 //   - ノード間の余白・サイズ感を調整するとき
 //   - フォントサイズを変更するとき（NODE_H の再計算も忘れずに）
 //   - ズームの上下限・ステップを変えるとき
-//   - GraphNode に座標ヘルパを追加するとき
 // =============================================================================
 
-// use crate::types::ExpandDir;
+use std::collections::HashMap;
+
 use util::NodeRecord;
 
 // ---------------------------------------------------------------------------
 // ノード描画定数
 // ---------------------------------------------------------------------------
 
-pub const NODE_PADDING_X: f64 = 12.0;
-pub const NODE_PADDING_Y: f64 = 8.0;
-pub const LABEL_FONT_SIZE: f64 = 14.0;
-pub const INFO_FONT_SIZE: f64 = 12.0;
-pub const LABEL_LINE_H: f64 = 20.0;
-pub const INFO_LINE_H: f64 = 18.0;
-/// ノード高さ（固定）= padding * 2 + ラベル行 + 補足情報行
-pub const NODE_H: f64 = NODE_PADDING_Y * 2.0 + LABEL_LINE_H + INFO_LINE_H;
-pub const NODE_MIN_W: f64 = 160.0;
-/// 全角1文字あたりの描画幅の目安
+pub const NODE_PADDING_X:    f64 = 12.0;
+pub const NODE_PADDING_Y:    f64 = 8.0;
+pub const LABEL_FONT_SIZE:   f64 = 14.0;
+pub const INFO_FONT_SIZE:    f64 = 12.0;
+pub const LABEL_LINE_H:      f64 = 20.0;
+pub const INFO_LINE_H:       f64 = 18.0;
+pub const NODE_H:            f64 = NODE_PADDING_Y * 2.0 + LABEL_LINE_H + INFO_LINE_H;
 pub const FULL_ANGLE_CHAR_W: f64 = LABEL_FONT_SIZE;
-pub const LABEL_MAX_CHARS: f64 = 14.0;
-pub const LABEL_MAX_W: f64 = FULL_ANGLE_CHAR_W * LABEL_MAX_CHARS;
-/// 記号+値 1件あたりの幅
-pub const INFO_ITEM_W: f64 = 60.0;
+pub const LABEL_MAX_CHARS:   f64 = 14.0;
+pub const LABEL_MAX_W:       f64 = FULL_ANGLE_CHAR_W * LABEL_MAX_CHARS;
+pub const INFO_ITEM_W:       f64 = 60.0;
+/// ノード幅（全角14文字基準で全列固定）
+pub const NODE_W:            f64 = LABEL_MAX_W + NODE_PADDING_X * 2.0;
 
 // ---------------------------------------------------------------------------
 // レイアウト定数
 // ---------------------------------------------------------------------------
 
-/// ノード間の水平余白
-pub const H_GAP: f64 = 40.0;
-/// ランク間の垂直余白
-pub const V_GAP: f64 = 80.0;
-/// ▲▼ハンドルの高さ領域
-pub const HANDLE_H: f64 = 20.0;
-/// ベジェ曲線の制御点オフセット
-pub const EDGE_CTRL_DY: f64 = 40.0;
+/// 列間の水平余白（ハンドル領域を含む）
+pub const H_GAP:        f64 = 60.0;
+/// 同一列内のノード間の垂直余白
+pub const V_GAP:        f64 = 12.0;
+/// ◀▶ハンドルの幅領域
+pub const HANDLE_W:     f64 = 20.0;
+/// ベジェ曲線の制御点水平オフセット
+pub const EDGE_CTRL_DX: f64 = 40.0;
+/// ID テキストのフォントサイズ
+pub const ID_FONT_SIZE: f64 = 10.0;
 
 // ---------------------------------------------------------------------------
 // ズーム定数
 // ---------------------------------------------------------------------------
 
-pub const ZOOM_MIN: f64 = 0.2;
-pub const ZOOM_MAX: f64 = 3.0;
-pub const ZOOM_STEP: f64 = 0.1;
-/// この倍率未満のとき、ホバーしたノードを DOM ポップアップで等倍表示する
+pub const ZOOM_MIN:              f64 = 0.2;
+pub const ZOOM_MAX:              f64 = 3.0;
+pub const ZOOM_STEP:             f64 = 0.1;
 pub const POPUP_SCALE_THRESHOLD: f64 = 0.8;
 
 // ---------------------------------------------------------------------------
-// ヘッダー高さ（styles.rs の --header-h と合わせること）
+// ヘッダー高さ
 // ---------------------------------------------------------------------------
 
 pub const HEADER_H: f64 = 56.0;
 
 // ---------------------------------------------------------------------------
-// GraphNode — NodeRecord をラップした描画・レイアウト計算用の型
+// 列の x 座標計算
 // ---------------------------------------------------------------------------
 
-/// `NodeRecord`（シャードデータ）に Canvas 上の論理座標を付与した型。
-/// 描画幅の計算・座標ヘルパ・ヒットテストをここに集約する。
-/// `NodeRecord` を所有するため、キャッシュとは独立して使用できる。
+/// 列インデックス col の左上 x 座標を返す。
+/// col=0 が起点列、負が先行列、正が後継列。
+/// ノード幅は全列固定（NODE_W）。
+pub fn col_x(col: i32) -> f64 {
+    col as f64 * (NODE_W + H_GAP + HANDLE_W * 2.0)
+}
+
+// ---------------------------------------------------------------------------
+// GraphNode
+// ---------------------------------------------------------------------------
+
+/// `NodeRecord` に Canvas 論理座標を付与した描画・レイアウト用の型。
 pub struct GraphNode {
-    /// シャードから読み込んだノードのデータ本体
     pub record: NodeRecord,
-    /// ノード矩形の左上 x（論理座標系、pan/scale 適用前）
+    /// ノード矩形の左上 x
     pub x: f64,
-    /// ノード矩形の左上 y（論理座標系、pan/scale 適用前）
+    /// ノード矩形の左上 y
     pub y: f64,
+    /// 所属する列インデックス
+    pub col: i32,
 }
 
 impl GraphNode {
-    /// `NodeRecord` と配置座標からコンストラクト。
-    pub fn new(record: NodeRecord, x: f64, y: f64) -> Self {
-        Self { record, x, y }
-    }
-
-    // --- 描画幅 ---
-
-    /// ノードの描画幅を計算する。
-    /// ラベル幅と補足情報幅の大きい方に padding を加えた値。
-    pub fn width(&self) -> f64 {
-        let info_w = INFO_ITEM_W * self.record.info_item_count() as f64;
-        (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
+    pub fn new(record: NodeRecord, col: i32, y: f64) -> Self {
+        let x = col_x(col);
+        Self { record, x, y, col }
     }
 
     // --- 座標ヘルパ ---
 
-    pub fn cx(&self) -> f64 {
-        self.x + self.width() / 2.0
-    }
-    #[allow(unused)]
-    pub fn cy(&self) -> f64 {
-        self.y + NODE_H / 2.0
-    }
-    pub fn right(&self) -> f64 {
-        self.x + self.width()
-    }
-    pub fn bottom(&self) -> f64 {
-        self.y + NODE_H
+    pub fn width(&self)  -> f64 { NODE_W }
+    pub fn cx(&self)     -> f64 { self.x + NODE_W / 2.0 }
+    pub fn cy(&self)     -> f64 { self.y + NODE_H / 2.0 }
+    pub fn right(&self)  -> f64 { self.x + NODE_W }
+    pub fn bottom(&self) -> f64 { self.y + NODE_H }
+
+    /// ◀ハンドルの論理座標（ノード左端中点の左側）
+    pub fn handle_left_center(&self) -> (f64, f64) {
+        (self.x - HANDLE_W / 2.0, self.cy())
     }
 
-    /// ▲ハンドルの論理座標（ノード中央上）
-    pub fn handle_up_center(&self) -> (f64, f64) {
-        (self.cx(), self.y - HANDLE_H / 2.0)
+    /// ▶ハンドルの論理座標（ノード右端中点の右側）
+    pub fn handle_right_center(&self) -> (f64, f64) {
+        (self.right() + HANDLE_W / 2.0, self.cy())
     }
 
-    /// ▼ハンドルの論理座標（ノード中央下）
-    pub fn handle_down_center(&self) -> (f64, f64) {
-        (self.cx(), self.bottom() + HANDLE_H / 2.0)
-    }
-
-    // --- ヒットテスト（論理座標） ---
+    // --- ヒットテスト ---
 
     pub fn hit_body(&self, lx: f64, ly: f64) -> bool {
         lx >= self.x && lx <= self.right() && ly >= self.y && ly <= self.bottom()
     }
 
-    pub fn hit_handle_up(&self, lx: f64, ly: f64) -> bool {
-        let (hx, hy) = self.handle_up_center();
-        let r = HANDLE_H;
-        (lx - hx).abs() < r && (ly - hy).abs() < r / 2.0
+    pub fn hit_handle_left(&self, lx: f64, ly: f64) -> bool {
+        let (hx, hy) = self.handle_left_center();
+        (lx - hx).abs() < HANDLE_W / 2.0 && (ly - hy).abs() < NODE_H / 2.0
     }
 
-    pub fn hit_handle_down(&self, lx: f64, ly: f64) -> bool {
-        let (hx, hy) = self.handle_down_center();
-        let r = HANDLE_H;
-        (lx - hx).abs() < r && (ly - hy).abs() < r / 2.0
+    pub fn hit_handle_right(&self, lx: f64, ly: f64) -> bool {
+        let (hx, hy) = self.handle_right_center();
+        (lx - hx).abs() < HANDLE_W / 2.0 && (ly - hy).abs() < NODE_H / 2.0
     }
 }
 
 // ---------------------------------------------------------------------------
-// Layout — 局所グラフのレイアウト計算結果
+// Layout
 // ---------------------------------------------------------------------------
 
-/// 起点 + 1ホップの局所グラフを表す。
-/// `Layout::new` がコンストラクタを兼ねる。
+/// 局所グラフのレイアウト。
+/// columns: col → ID リスト（ID 昇順）を管理し、
+/// y 座標は columns から都度再計算する。
 #[derive(Default)]
 pub struct Layout {
-    /// 描画対象ノード（起点 + 先行群 + 後継群）
     pub nodes: Vec<GraphNode>,
-    /// エッジ (from_id, to_id)
     pub edges: Vec<(u32, u32)>,
+    /// 列ごとの ID リスト（ID 昇順）
+    columns: HashMap<i32, Vec<u32>>,
 }
 
 impl Layout {
-    /// 起点ノードと隣接ノード群から局所グラフのレイアウトを構築する。
-    ///
-    /// # 座標系
-    /// - 起点ノードの中央が論理座標 (0, 0)
-    /// - 先行群は y 方向に上（負）、後継群は y 方向に下（正）
-    /// - Canvas 描画時に `translate(canvas_w/2, canvas_h/2)` + pan + scale を適用
-    ///
-    /// # 引数
-    /// - `root`  : 起点ノード
-    /// - `preds` : 表示する先行ノード群（`ExpandDir::Down` のときは空）
-    /// - `succs` : 表示する後継ノード群（`ExpandDir::Up` のときは空）
-    pub fn new(root: NodeRecord, preds: Vec<NodeRecord>, succs: Vec<NodeRecord>) -> Self {
-        let mut nodes: Vec<GraphNode> = Vec::new();
-        let mut edges: Vec<(u32, u32)> = Vec::new();
-
-        // ランク内の全ノードを横並びにしたときの合計幅を求める
-        // （GraphNode を生成する前に幅だけ必要なため NodeRecord から計算）
-        let rank_total_w = |records: &[NodeRecord]| -> f64 {
-            if records.is_empty() {
-                return 0.0;
-            }
-            let nodes_w: f64 = records
-                .iter()
-                .map(|r| {
-                    let info_w = INFO_ITEM_W * r.info_item_count() as f64;
-                    (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
-                })
-                .sum();
-            nodes_w + H_GAP * (records.len() as f64 - 1.0)
-        };
-
-        let root_w = {
-            let info_w = INFO_ITEM_W * root.info_item_count() as f64;
-            (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
-        };
-        let pred_total_w = rank_total_w(&preds);
-        let succ_total_w = rank_total_w(&succs);
-
-        // 起点を (0, 0) に配置
-        let root_y = 0.0_f64;
-        let pred_y = root_y - NODE_H - V_GAP - HANDLE_H * 2.0;
-        let succ_y = root_y + NODE_H + V_GAP + HANDLE_H * 2.0;
+    /// 起点ノード単体で初期化する（Search 時）。
+    pub fn single(root: NodeRecord) -> Self {
         let root_id = root.id;
-
-        // 先行群: 中央揃えで横に配置
-        if !preds.is_empty() {
-            let mut px = -pred_total_w / 2.0;
-            for pred in preds {
-                let w = {
-                    let info_w = INFO_ITEM_W * pred.info_item_count() as f64;
-                    (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
-                };
-                edges.push((pred.id, root_id));
-                nodes.push(GraphNode::new(pred, px, pred_y));
-                px += w + H_GAP;
-            }
-        }
-
-        // 起点
-        nodes.push(GraphNode::new(root, -root_w / 2.0, root_y));
-
-        // 後継群: 中央揃えで横に配置
-        if !succs.is_empty() {
-            let mut sx = -succ_total_w / 2.0;
-            for succ in succs {
-                let w = {
-                    let info_w = INFO_ITEM_W * succ.info_item_count() as f64;
-                    (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
-                };
-                edges.push((root_id, succ.id));
-                nodes.push(GraphNode::new(succ, sx, succ_y));
-                sx += w + H_GAP;
-            }
-        }
-
-        Self { nodes, edges }
+        let mut columns: HashMap<i32, Vec<u32>> = HashMap::new();
+        columns.insert(0, vec![root_id]);
+        let nodes = vec![GraphNode::new(root, 0, 0.0)];
+        Self { nodes, edges: vec![], columns }
     }
 
-    /// 既存レイアウトに、node_id を起点とした 1 ホップを追記する。
-    /// is_up=true で先行方向、false で後継方向。
-    /// adj_records は呼び出し元のキャッシュへの参照イテレータ。
-    /// clone は GraphNode 生成が確定した時点でのみ発生する。
+    /// node_id を起点に隣接ノード群を追記する。
+    /// is_left=true で先行方向（列-1）、false で後継方向（列+1）。
+    /// adj_records: 呼び出し元でキャッシュから取得済みの参照イテレータ。
+    /// 重複ノードは除外し、同一列を ID 昇順に再整列する。
     pub fn append<'a>(
         &mut self,
-        node_id: u32,
-        is_up: bool,
+        node_id:     u32,
+        is_left:     bool,
         adj_records: impl Iterator<Item = &'a NodeRecord>,
     ) {
-        // 起点ノードが Layout 上に存在しなければ何もしない
-        let anchor_idx = match self.nodes.iter().position(|n| n.record.id == node_id) {
-            Some(i) => i,
-            None => return,
+        // 起点ノードが Layout 上になければ何もしない
+        let anchor_col = match self.nodes.iter().find(|n| n.record.id == node_id) {
+            Some(n) => n.col,
+            None    => return,
         };
 
-        // 重複チェックは参照のまま行う（clone はしない）
+        let target_col = if is_left { anchor_col - 1 } else { anchor_col + 1 };
+
+        // 既存 ID セット（重複チェック用）
+        let existing_ids: std::collections::HashSet<u32> =
+            self.nodes.iter().map(|n| n.record.id).collect();
+
+        // 新規レコードのみ収集（重複除外、clone は GraphNode 生成時のみ）
         let new_records: Vec<&NodeRecord> = adj_records
-            .filter(|r| !self.nodes.iter().any(|n| n.record.id == r.id))
+            .filter(|r| !existing_ids.contains(&r.id))
             .collect();
 
-        if new_records.is_empty() {
-            return;
-        }
-
-        // 新規ノード群の合計幅
-        let total_w: f64 = {
-            let w_sum: f64 = new_records
-                .iter()
-                .map(|r| {
-                    let info_w = INFO_ITEM_W * r.info_item_count() as f64;
-                    (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
-                })
-                .sum();
-            w_sum + H_GAP * (new_records.len() as f64 - 1.0)
-        };
-
-        // 起点ノードの中央 x に揃えて配置
-        let anchor_cx = self.nodes[anchor_idx].cx();
-        let anchor_y = self.nodes[anchor_idx].y;
-        let new_y = if is_up {
-            anchor_y - NODE_H - V_GAP - HANDLE_H * 2.0
-        } else {
-            anchor_y + NODE_H + V_GAP + HANDLE_H * 2.0
-        };
-        let mut nx = anchor_cx - total_w / 2.0;
-
-        // ここで初めて clone が発生する（追加確定したノードのみ）
-        for record in new_records {
-            let w = {
-                let info_w = INFO_ITEM_W * record.info_item_count() as f64;
-                (LABEL_MAX_W.max(info_w) + NODE_PADDING_X * 2.0).max(NODE_MIN_W)
-            };
-            if is_up {
-                self.edges.push((record.id, node_id));
+        // エッジ追加・columns 更新
+        for r in &new_records {
+            if is_left {
+                self.edges.push((r.id, node_id));
             } else {
-                self.edges.push((node_id, record.id));
+                self.edges.push((node_id, r.id));
             }
-            self.nodes.push(GraphNode::new(record.clone(), nx, new_y));
-            nx += w + H_GAP;
+            self.columns
+                .entry(target_col)
+                .or_default()
+                .push(r.id);
         }
+
+        // target_col の ID リストを昇順ソート
+        if let Some(col_ids) = self.columns.get_mut(&target_col) {
+            col_ids.sort_unstable();
+        }
+
+        // 新規 GraphNode を追加（y は仮値、後で再計算）
+        for r in new_records {
+            self.nodes.push(GraphNode::new(r.clone(), target_col, 0.0));
+        }
+
+        // target_col の全ノードの y 座標を再計算
+        self.recalc_col_y(target_col);
     }
 
-    /// キャッシュ済みノード群と展開方向から `Layout` を構築するファクトリ。
-    /// `App::rebuild_layout` から呼ばれる。
-    pub fn from_cache(root: NodeRecord, find: impl Fn(u32) -> Option<NodeRecord>) -> Self {
-        let preds = root
-            .predecessors
-            .iter()
-            .filter_map(|&id| find(id))
-            .collect();
-        let succs = root.successors.iter().filter_map(|&id| find(id)).collect();
-        Self::new(root, preds, succs)
+    /// 指定列の全ノードを ID 昇順に並べ、y 座標を中央揃えで再計算する。
+    fn recalc_col_y(&mut self, col: i32) {
+        let col_ids = match self.columns.get(&col) {
+            Some(ids) => ids.clone(),
+            None      => return,
+        };
+        let n = col_ids.len();
+        let total_h = n as f64 * NODE_H + (n as f64 - 1.0) * V_GAP;
+        let y_top   = -(total_h / 2.0);
+
+        for (i, &id) in col_ids.iter().enumerate() {
+            let y = y_top + i as f64 * (NODE_H + V_GAP);
+            if let Some(gn) = self.nodes.iter_mut().find(|n| n.record.id == id) {
+                gn.y = y;
+                gn.x = col_x(col); // x も念のため更新
+            }
+        }
     }
 }

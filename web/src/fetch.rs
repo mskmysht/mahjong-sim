@@ -23,7 +23,10 @@ use crate::types::Msg;
 
 pub const SHARD_SIZE: u32 = 15_625;
 pub const TOTAL_NODES: u32 = 405_348;
-pub const DATA_ROOT: &str = "./assets/shards";
+pub const DATA_ROOT: &str = match option_env!("SHARD_DATA_ROOT") {
+    Some(s) => s,
+    None => "./data",
+};
 
 // ---------------------------------------------------------------------------
 // シャードユーティリティ
@@ -118,7 +121,9 @@ pub fn find_in_cache<'a>(
         .find(|r| r.id == node_id)
 }
 
-/// キャッシュ済みのレコードの参照をイテレータで返す
+/// adj_ids のうちキャッシュ済みのレコードへの参照をイテレータで返す。
+/// 中間 Vec を生成せず、clone も行わない。
+/// clone が必要な場合は呼び出し元（Layout::append）で行う。
 pub fn cached_records<'a>(
     adj_ids: &'a [u32],
     cache: &'a HashMap<u32, Vec<NodeRecord>>,

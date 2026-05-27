@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      SHARD_DATA_ROOT: "./assets/shards"
     steps:
       - uses: actions/checkout@v6
 
