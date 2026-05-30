@@ -8,12 +8,14 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
-use crate::canvas::{draw_canvas, info_text};
+use crate::canvas::draw_canvas;
 use crate::fetch::{
     SHARD_SIZE, TOTAL_NODES, cached_records, deserialize_shard, fetch_adjacent, fetch_shard,
     find_in_cache, shard_index,
 };
-use crate::layout::{HEADER_H, Layout, POPUP_SCALE_THRESHOLD, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
+use crate::layout::{
+    HEADER_H, Layout, POPUP_SCALE_THRESHOLD, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, info_text,
+};
 use crate::styles::STYLES;
 use crate::types::{HoverTarget, Msg, NodeRecord};
 // ---------------------------------------------------------------------------
