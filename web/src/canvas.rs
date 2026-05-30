@@ -73,7 +73,18 @@ pub fn draw_canvas(
     for gn in &layout.nodes {
         let is_root = gn.record.id == root_id;
         let is_hovered = matches!(hover, Some(HoverTarget::NodeBody(id)) if *id == gn.record.id);
-        draw_node(&ctx, gn, is_root, is_hovered, hover, scale);
+        let left_expanded = layout.is_expanded_left(gn.record.id);
+        let right_expanded = layout.is_expanded_right(gn.record.id);
+        draw_node(
+            &ctx,
+            gn,
+            is_root,
+            is_hovered,
+            hover,
+            left_expanded,
+            right_expanded,
+            scale,
+        );
     }
 
     ctx.restore();
@@ -118,6 +129,8 @@ fn draw_node(
     is_root: bool,
     is_hovered: bool,
     hover: &Option<HoverTarget>,
+    left_expanded: bool,
+    right_expanded: bool,
     scale: f64,
 ) {
     let x = gn.x;
@@ -173,18 +186,22 @@ fn draw_node(
         y + NODE_PADDING_Y + LABEL_LINE_H + INFO_FONT_SIZE,
     );
 
-    // ◀ハンドル（先行が存在する場合）
+    // ◀/‹ ハンドル（先行が存在する場合）
+    // «: 未展開、‹: 展開済み
     if !gn.record.predecessors.is_empty() {
         let (hx, hy) = gn.handle_left_center();
         let hovered = matches!(hover, Some(HoverTarget::HandleLeft(id)) if *id == gn.record.id);
-        draw_handle(ctx, hx, hy, "◀", hovered, scale);
+        let symbol = if left_expanded { "‹" } else { "«" };
+        draw_handle(ctx, hx, hy, symbol, hovered, left_expanded, scale);
     }
 
-    // ▶ハンドル（後継が存在する場合）
+    // ▶/› ハンドル（後継が存在する場合）
+    // »: 未展開、›: 展開済み
     if !gn.record.successors.is_empty() {
         let (hx, hy) = gn.handle_right_center();
         let hovered = matches!(hover, Some(HoverTarget::HandleRight(id)) if *id == gn.record.id);
-        draw_handle(ctx, hx, hy, "▶", hovered, scale);
+        let symbol = if right_expanded { "›" } else { "»" };
+        draw_handle(ctx, hx, hy, symbol, hovered, right_expanded, scale);
     }
 }
 
@@ -198,10 +215,19 @@ fn draw_handle(
     cy: f64,
     symbol: &str,
     hovered: bool,
+    expanded: bool,
     scale: f64,
 ) {
-    ctx.set_fill_style_str(if hovered { "#4fc3f7" } else { "#3a4a60" });
-    ctx.set_font(&format!("{}px sans-serif", 12.0 / scale.max(0.5)));
+    // 展開済み: アクセントカラー、未展開: グレー、ホバー: 明るいアクセント
+    let color = if hovered {
+        "#80deea"
+    } else if expanded {
+        "#4fc3f7"
+    } else {
+        "#3a4a60"
+    };
+    ctx.set_fill_style_str(color);
+    ctx.set_font(&format!("{}px sans-serif", 14.0 / scale.max(0.5)));
     ctx.set_text_align("center");
     ctx.set_text_baseline("middle");
     let _ = ctx.fill_text(symbol, cx, cy);
