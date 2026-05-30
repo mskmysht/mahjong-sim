@@ -26,7 +26,7 @@ pub const NODE_H: f64 = NODE_PADDING_Y * 2.0 + LABEL_LINE_H + INFO_LINE_H;
 pub const FULL_ANGLE_CHAR_W: f64 = LABEL_FONT_SIZE;
 pub const LABEL_MAX_CHARS: f64 = 14.0;
 pub const LABEL_MAX_W: f64 = FULL_ANGLE_CHAR_W * LABEL_MAX_CHARS;
-// pub const INFO_ITEM_W:       f64 = 60.0;
+// pub const INFO_ITEM_W: f64 = 60.0;
 /// ノード幅（全角14文字基準で全列固定）
 pub const NODE_W: f64 = LABEL_MAX_W + NODE_PADDING_X * 2.0;
 

@@ -8,17 +8,14 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
-use crate::canvas::draw_canvas;
+use crate::canvas::{draw_canvas, info_text};
 use crate::fetch::{
     SHARD_SIZE, TOTAL_NODES, cached_records, deserialize_shard, fetch_adjacent, fetch_shard,
     find_in_cache, shard_index,
 };
 use crate::layout::{HEADER_H, Layout, POPUP_SCALE_THRESHOLD, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 use crate::styles::STYLES;
-use crate::types::{HoverTarget, Msg};
-
-use util::NodeRecord;
-
+use crate::types::{HoverTarget, Msg, NodeRecord};
 // ---------------------------------------------------------------------------
 // App 構造体
 // ---------------------------------------------------------------------------
@@ -407,6 +404,16 @@ impl Component for App {
             html! {}
         };
 
+        // 凡例パネル: util::value_labels() を横並びで表示
+        let legend: Html = util::value_labels()
+            .iter()
+            .map(|&label| {
+                html! {
+                    <span class="legend-item">{label}</span>
+                }
+            })
+            .collect();
+
         html! {
             <>
                 <style>{STYLES}</style>
@@ -426,6 +433,7 @@ impl Component for App {
                             />
                             <button class="search-btn" onclick={on_search}>{"Search"}</button>
                         </div>
+                        <div class="legend">{legend}</div>
                         {loading}
                     </header>
                     <div class="canvas-wrap">
@@ -491,7 +499,7 @@ impl App {
         html! {
             <div class="node-popup" style={style}>
                 <div class="popup-label">{format!("#{} {}", gn.record.id, gn.record.label)}</div>
-                <div class="popup-info">{gn.record.info_text()}</div>
+                <div class="popup-info">{info_text(gn.record.values())}</div>
             </div>
         }
     }

@@ -41,14 +41,23 @@ impl NodeData {
         }
     }
 
-    fn text(&self) -> String {
-        format!(
-            "{} {} {} {} {}",
-            self.sequence, self.triple, self.double, self.neighbor, self.skip,
-        )
+    fn values(&self) -> impl Iterator<Item = u32> {
+        [
+            self.triple,
+            self.sequence,
+            self.neighbor,
+            self.skip,
+            self.double,
+        ]
+        .into_iter()
     }
 }
 
+pub const VALUE_LABELS: &[&str] = &["triple", "sequence", "neighbor", "skip", "double"];
+
+pub fn value_labels() -> &'static [&'static str] {
+    &VALUE_LABELS
+}
 #[derive(Debug, Archive, Serialize, Deserialize, Default)]
 pub struct ShardMap {
     pub nodes: BTreeMap<u32, Node>,
@@ -72,15 +81,7 @@ pub const SHARD_SIZE: u32 = 15_625;
 pub const TOTAL_NODES: u32 = 405_348;
 
 impl NodeRecord {
-    /// 補足情報の件数（記号+値の横一列アイテム数）。
-    /// フィールドを追加した場合はここを変更すること。
-    pub fn info_item_count(&self) -> usize {
-        3 // value_a, value_b, value_c
-    }
-
-    /// 補足情報の表示文字列。
-    /// フィールドを追加した場合はここを変更すること。
-    pub fn info_text(&self) -> String {
-        self.data.text()
+    pub fn values(&self) -> impl Iterator<Item = u32> {
+        self.data.values()
     }
 }

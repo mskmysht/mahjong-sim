@@ -102,6 +102,20 @@ body {
 }
 .search-btn:hover { opacity: .85; }
 
+/* ── 凡例パネル ── */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-left: 1rem;
+}
+.legend-item {
+  font-family: var(--font-mono);
+  font-size: .78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 /* ── ローディングインジケータ ── */
 .loading-indicator {
   margin-left: auto;

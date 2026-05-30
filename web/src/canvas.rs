@@ -11,11 +11,21 @@
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use crate::layout::{
-    EDGE_CTRL_DX, GraphNode, HANDLE_W, ID_FONT_SIZE, INFO_FONT_SIZE, LABEL_FONT_SIZE, LABEL_LINE_H,
-    Layout, NODE_H, NODE_PADDING_X, NODE_PADDING_Y,
-};
+use crate::layout::*;
 use crate::types::HoverTarget;
+
+// ---------------------------------------------------------------------------
+// 補足情報テキスト生成（描画用ローカル関数）
+// ---------------------------------------------------------------------------
+
+/// 値のスライスを受け取り Canvas 表示用の文字列を生成する。
+/// ラベルは util::value_labels() で別途凡例として表示するためここでは含めない。
+pub fn info_text(values: impl Iterator<Item = u32>) -> String {
+    values
+        .map(|v| format!("{:5}", v))
+        .collect::<Vec<_>>()
+        .join("  ")
+}
 
 // ---------------------------------------------------------------------------
 // 描画エントリーポイント
@@ -177,11 +187,11 @@ fn draw_node(
         y + NODE_PADDING_Y + LABEL_FONT_SIZE,
     );
 
-    // 補足情報行
+    // 補足情報行（値のみ・ラベルは凡例パネルで表示）
     ctx.set_fill_style_str("#6b7a99");
     ctx.set_font(&format!("{}px 'JetBrains Mono', monospace", INFO_FONT_SIZE));
     let _ = ctx.fill_text(
-        &gn.record.info_text(),
+        &info_text(gn.record.values()),
         text_x,
         y + NODE_PADDING_Y + LABEL_LINE_H + INFO_FONT_SIZE,
     );
