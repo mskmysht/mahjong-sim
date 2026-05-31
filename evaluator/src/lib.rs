@@ -408,7 +408,7 @@ impl From<TileGroupData> for BTreeMap<u32, util::ShardMap> {
                     value.compl_map.preds.remove(&id).unwrap_or_default(),
                     value.compl_map.succs.remove(&id).unwrap_or_default(),
                     label,
-                    util::NodeData::new(
+                    util::NodeScore::new(
                         gc[&GroupType::Triple],
                         gc[&GroupType::Sequence],
                         gc[&GroupType::Neighbor],
@@ -428,20 +428,20 @@ impl From<TileGroupData> for BTreeMap<u32, Vec<util::NodeRecord>> {
         for (id, gc) in value.compl_map.counter {
             let shard_id = id / util::SHARD_SIZE;
             let recs = shard_map.entry(shard_id).or_default();
-            let label = decode_to_tile_vec(id).iter().join(",");
-            recs.push(util::NodeRecord {
+            let tiles = decode_to_tile_vec(id);
+            recs.push(util::NodeRecord::new(
                 id,
-                label,
-                data: util::NodeData::new(
+                tiles,
+                util::NodeScore::new(
                     gc[&GroupType::Triple],
                     gc[&GroupType::Sequence],
                     gc[&GroupType::Neighbor],
                     gc[&GroupType::Skip],
                     gc[&GroupType::Double],
                 ),
-                successors: value.compl_map.succs.remove(&id).unwrap_or_default(),
-                predecessors: value.compl_map.preds.remove(&id).unwrap_or_default(),
-            });
+                 value.compl_map.preds.remove(&id).unwrap_or_default(),
+                 value.compl_map.succs.remove(&id).unwrap_or_default(),
+            ));
         }
         shard_map
     }

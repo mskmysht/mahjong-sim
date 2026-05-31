@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 csv = { workspace = true }
 rkyv = { workspace = true }
+itertools = { workspace = true }

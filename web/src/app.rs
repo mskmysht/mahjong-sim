@@ -1,8 +1,14 @@
 // =============================================================================
 // app.rs — App 構造体・Yew Component 実装
 // =============================================================================
+//
+// 変更が必要なケース:
+//   - Msg の処理フローを変えるとき
+//   - コンテキストメニューの項目を追加するとき
+//   - view() の HTML 構造を変えるとき
+// =============================================================================
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use wasm_bindgen::JsCast;
 use web_sys::HtmlInputElement;
@@ -10,32 +16,62 @@ use yew::prelude::*;
 
 use crate::canvas::draw_canvas;
 use crate::fetch::{
-    SHARD_SIZE, TOTAL_NODES, cached_records, deserialize_shard, fetch_adjacent, fetch_shard,
-    find_in_cache, shard_index,
+    SHARD_SIZE, TOTAL_NODES, deserialize_shard, fetch_shard, find_in_cache, shard_index,
 };
-use crate::layout::{
-    HEADER_H, Layout, POPUP_SCALE_THRESHOLD, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, info_text,
-};
+use crate::layout::{HEADER_H, Layout, POPUP_SCALE_THRESHOLD, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
 use crate::styles::STYLES;
-use crate::types::{HoverTarget, Msg, NodeRecord};
+use crate::types::{ContextAction, HoverTarget, Msg, NodeRecord, SortMode};
+
+// ---------------------------------------------------------------------------
+// コンテキストメニューの状態
+// ---------------------------------------------------------------------------
+
+struct ContextMenu {
+    /// 対象ノードの rep_id
+    node_id: u32,
+    /// Canvas 上のスクリーン座標
+    x: f64,
+    y: f64,
+    /// 表示する操作項目
+    actions: Vec<ContextAction>,
+}
+
 // ---------------------------------------------------------------------------
 // App 構造体
 // ---------------------------------------------------------------------------
 
 pub struct App {
+    // 検索
     pub input: String,
-    pub root_error: Option<String>,
-    pub root_id: Option<u32>,
+    pub error: Option<String>,
+
+    // レイアウト
     pub layout: Layout,
+
+    // シャードキャッシュ: shard_index → Vec<NodeRecord>
     pub cache: HashMap<u32, Vec<NodeRecord>>,
-    pub fetching: HashSet<u32>,
+    pub fetching: std::collections::HashSet<u32>,
+
+    // ノード追加待ちキュー: フェッチ完了後に追加するノード ID
+    pending_add: std::collections::HashSet<u32>,
+
+    // Canvas ビュー変換
     pub pan_x: f64,
     pub pan_y: f64,
     pub scale: f64,
     pub canvas_w: f64,
     pub canvas_h: f64,
+
+    // ドラッグ: (mouse_x, mouse_y, pan_x_origin, pan_y_origin)
     pub drag_start: Option<(f64, f64, f64, f64)>,
+
+    // ホバー
     pub hover: Option<HoverTarget>,
+
+    // コンテキストメニュー
+    context_menu: Option<ContextMenu>,
+
+    // Canvas への NodeRef
     pub canvas_ref: NodeRef,
 }
 
@@ -43,11 +79,11 @@ impl Default for App {
     fn default() -> Self {
         Self {
             input: String::new(),
-            root_error: None,
-            root_id: None,
+            error: None,
             layout: Layout::default(),
             cache: HashMap::new(),
-            fetching: HashSet::new(),
+            fetching: std::collections::HashSet::new(),
+            pending_add: std::collections::HashSet::new(),
             pan_x: 0.0,
             pan_y: 0.0,
             scale: 1.0,
@@ -55,6 +91,7 @@ impl Default for App {
             canvas_h: 600.0,
             drag_start: None,
             hover: None,
+            context_menu: None,
             canvas_ref: NodeRef::default(),
         }
     }
@@ -79,36 +116,30 @@ impl App {
     }
 
     fn hit_test(&self, lx: f64, ly: f64) -> Option<HoverTarget> {
-        self.root_id?;
         for gn in &self.layout.nodes {
-            if !gn.record.predecessors.is_empty() && gn.hit_handle_left(lx, ly) {
-                return Some(HoverTarget::HandleLeft(gn.record.id));
+            // ハンドルを先にチェック
+            let has_left = gn
+                .kind
+                .as_normal()
+                .map(|r| !r.predecessors.is_empty())
+                .unwrap_or(false);
+            let has_right = gn
+                .kind
+                .as_normal()
+                .map(|r| !r.successors.is_empty())
+                .unwrap_or(false);
+
+            if has_left && gn.hit_handle_left(lx, ly) {
+                return Some(HoverTarget::HandleLeft(gn.rep_id()));
             }
-            if !gn.record.successors.is_empty() && gn.hit_handle_right(lx, ly) {
-                return Some(HoverTarget::HandleRight(gn.record.id));
+            if has_right && gn.hit_handle_right(lx, ly) {
+                return Some(HoverTarget::HandleRight(gn.rep_id()));
             }
             if gn.hit_body(lx, ly) {
-                return Some(HoverTarget::NodeBody(gn.record.id));
+                return Some(HoverTarget::NodeBody(gn.rep_id()));
             }
         }
         None
-    }
-
-    /// ハンドルクリック時に展開済みかどうかで Expand/Collapse を振り分ける
-    fn handle_left_click(&self, node_id: u32) -> Msg {
-        if self.layout.is_expanded_left(node_id) {
-            Msg::CollapseLeft(node_id)
-        } else {
-            Msg::ExpandLeft(node_id)
-        }
-    }
-
-    fn handle_right_click(&self, node_id: u32) -> Msg {
-        if self.layout.is_expanded_right(node_id) {
-            Msg::CollapseRight(node_id)
-        } else {
-            Msg::ExpandRight(node_id)
-        }
     }
 
     fn redraw(&self) {
@@ -120,9 +151,102 @@ impl App {
             self.pan_y,
             self.scale,
             &self.layout,
-            self.root_id,
             &self.hover,
         );
+    }
+
+    /// ノードを追加する（キャッシュ済みなら即座に、未フェッチならフェッチ後に）
+    fn add_node_or_fetch(&mut self, ctx: &Context<Self>, node_id: u32) {
+        if let Some(record) = self.find_cloned(node_id) {
+            self.layout
+                .add_node(record, &self.cache, SortMode::default());
+        } else if !self.fetching.contains(&node_id) {
+            self.fetching.insert(node_id);
+            self.pending_add.insert(node_id);
+            fetch_shard(ctx.link(), node_id);
+        } else {
+            // フェッチ中: pending_add に追加してフェッチ完了を待つ
+            self.pending_add.insert(node_id);
+        }
+    }
+
+    /// コンテキストメニューの表示項目を決定する
+    fn build_context_actions(&self, node_id: u32) -> Vec<ContextAction> {
+        let mut actions = Vec::new();
+        let gn = match self.layout.find_node(node_id) {
+            Some(g) => g,
+            None => return actions,
+        };
+
+        // 省略ノードなら展開のみ
+        if gn.kind.is_collapsed() {
+            actions.push(ContextAction::ExpandCollapsed);
+            // collapsed_records が空でない（縮約操作由来）なら可逆展開も追加
+            if let crate::types::NodeKind::Collapsed {
+                collapsed_records, ..
+            } = &gn.kind
+            {
+                if !collapsed_records.is_empty() {
+                    // ExpandCollapsed で統一（UI 上は同じラベルでよい）
+                }
+            }
+            return actions;
+        }
+
+        // 通常ノード
+        let tier = gn.tier;
+
+        // 仕様3: 同 tier に他ノードが2件以上存在するか
+        let others_in_tier = self
+            .layout
+            .nodes
+            .iter()
+            .filter(|g| g.tier == tier && g.rep_id() != node_id)
+            .count();
+        if others_in_tier >= 1 {
+            actions.push(ContextAction::CollapseOthersInTier);
+        }
+
+        // 仕様4: 複数選択中か
+        if self.layout.selected.len() >= 2 && self.layout.is_selected(node_id) {
+            actions.push(ContextAction::CollapseSelected);
+        }
+
+        // 仕様5: 後継ノードが tier ごとに2件以上存在するか
+        let succ_count_by_tier: HashMap<u32, usize> = self
+            .layout
+            .edges
+            .iter()
+            .filter(|&&(from, _)| from == node_id)
+            .filter_map(|&(_, to)| self.layout.find_node(to).map(|g| g.tier))
+            .fold(HashMap::new(), |mut m, t| {
+                *m.entry(t).or_insert(0) += 1;
+                m
+            });
+        if succ_count_by_tier.values().any(|&c| c >= 2) {
+            actions.push(ContextAction::CollapseSuccsByTier);
+        }
+
+        // 仕様6: 先行ノードが tier ごとに2件以上存在するか
+        let pred_count_by_tier: HashMap<u32, usize> = self
+            .layout
+            .edges
+            .iter()
+            .filter(|&&(_, to)| to == node_id)
+            .filter_map(|&(from, _)| self.layout.find_node(from).map(|g| g.tier))
+            .fold(HashMap::new(), |mut m, t| {
+                *m.entry(t).or_insert(0) += 1;
+                m
+            });
+        if pred_count_by_tier.values().any(|&c| c >= 2) {
+            actions.push(ContextAction::CollapsePredsByTier);
+        }
+
+        actions
+    }
+
+    fn default_sort_mode(&self) -> SortMode {
+        SortMode::default()
     }
 }
 
@@ -168,93 +292,161 @@ impl Component for App {
             }
 
             // ----------------------------------------------------------------
-            Msg::Search => {
-                let raw = self.input.trim().to_string();
-                let node_id: u32 = match raw.parse() {
-                    Ok(v) => v,
-                    Err(_) => {
-                        self.root_error =
-                            Some(format!("「{raw}」は有効なノード ID ではありません"));
-                        return true;
-                    }
-                };
+            Msg::AddNode(node_id) => {
+                self.error = None;
+                self.context_menu = None;
+
                 if node_id >= TOTAL_NODES {
-                    self.root_error = Some(format!(
+                    self.error = Some(format!(
                         "ノード ID {node_id} は範囲外です (0 〜 {})",
                         TOTAL_NODES - 1
                     ));
                     return true;
                 }
-                self.root_error = None;
-                self.root_id = Some(node_id);
+
+                self.add_node_or_fetch(ctx, node_id);
+                self.redraw();
+                true
+            }
+
+            // ----------------------------------------------------------------
+            Msg::ClearGraph => {
+                self.layout.clear();
                 self.pan_x = 0.0;
                 self.pan_y = 0.0;
                 self.scale = 1.0;
                 self.hover = None;
-                self.layout = Layout::default();
-
-                if let Some(root) = self.find_cloned(node_id) {
-                    // キャッシュ済み: 起点単体で表示
-                    self.layout = Layout::single(root);
-                    self.redraw();
-                } else if !self.fetching.contains(&node_id) {
-                    self.fetching.insert(node_id);
-                    fetch_shard(ctx.link(), node_id);
-                }
-                true
-            }
-
-            // ----------------------------------------------------------------
-            Msg::ExpandLeft(node_id) => {
-                self.hover = None;
-                if let Some(root) = self.find_cloned(node_id) {
-                    let adj_ids = root.predecessors.clone();
-                    fetch_adjacent(ctx.link(), &adj_ids, &mut self.fetching, &self.cache);
-                    // borrowck 回避: キャッシュ参照を先に収集
-                    let adj: Vec<&NodeRecord> = cached_records(&adj_ids, &self.cache).collect();
-                    self.layout.append(node_id, true, adj.into_iter());
-                    self.redraw();
-                } else if !self.fetching.contains(&node_id) {
-                    self.fetching.insert(node_id);
-                    fetch_shard(ctx.link(), node_id);
-                }
-                true
-            }
-
-            // ----------------------------------------------------------------
-            Msg::ExpandRight(node_id) => {
-                self.hover = None;
-                if let Some(root) = self.find_cloned(node_id) {
-                    let adj_ids = root.successors.clone();
-                    fetch_adjacent(ctx.link(), &adj_ids, &mut self.fetching, &self.cache);
-                    let adj: Vec<&NodeRecord> = cached_records(&adj_ids, &self.cache).collect();
-                    self.layout.append(node_id, false, adj.into_iter());
-                    self.redraw();
-                } else if !self.fetching.contains(&node_id) {
-                    self.fetching.insert(node_id);
-                    fetch_shard(ctx.link(), node_id);
-                }
-                true
-            }
-
-            // ----------------------------------------------------------------
-            Msg::CollapseLeft(node_id) => {
-                self.hover = None;
-                self.layout.collapse(node_id, true);
+                self.context_menu = None;
+                self.pending_add.clear();
                 self.redraw();
                 true
             }
 
             // ----------------------------------------------------------------
-            Msg::CollapseRight(node_id) => {
-                self.hover = None;
-                self.layout.collapse(node_id, false);
+            Msg::ToggleSelect(rep_id) => {
+                self.layout.toggle_select(rep_id);
+                self.context_menu = None;
                 self.redraw();
                 true
+            }
+
+            Msg::ClearSelection => {
+                self.layout.clear_selection();
+                self.redraw();
+                true
+            }
+
+            // ----------------------------------------------------------------
+            Msg::ExpandCollapsed(rep_id) => {
+                self.context_menu = None;
+                let sort_mode = self.default_sort_mode();
+                self.layout.expand_collapsed(rep_id, &self.cache, sort_mode);
+                self.redraw();
+                true
+            }
+
+            // ----------------------------------------------------------------
+            Msg::CollapseOthersInTier(node_id) => {
+                self.context_menu = None;
+                let sort_mode = self.default_sort_mode();
+                self.layout.collapse_others_in_tier(node_id, sort_mode);
+                self.redraw();
+                true
+            }
+
+            Msg::CollapseSelected => {
+                self.context_menu = None;
+                let sort_mode = self.default_sort_mode();
+                self.layout.collapse_selected(sort_mode);
+                self.redraw();
+                true
+            }
+
+            Msg::CollapseSuccsByTier(node_id) => {
+                self.context_menu = None;
+                let sort_mode = self.default_sort_mode();
+                self.layout.collapse_succs_by_tier(node_id, sort_mode);
+                self.redraw();
+                true
+            }
+
+            Msg::CollapsePredsByTier(node_id) => {
+                self.context_menu = None;
+                let sort_mode = self.default_sort_mode();
+                self.layout.collapse_preds_by_tier(node_id, sort_mode);
+                self.redraw();
+                true
+            }
+
+            Msg::ExpandCollapsedReversible(rep_id) => {
+                self.context_menu = None;
+                let sort_mode = self.default_sort_mode();
+                self.layout.expand_collapsed_reversible(rep_id, sort_mode);
+                self.redraw();
+                true
+            }
+
+            // ----------------------------------------------------------------
+            Msg::CycleSortMode(tier) => {
+                self.layout.cycle_sort_mode(tier);
+                self.redraw();
+                true
+            }
+
+            // ----------------------------------------------------------------
+            Msg::ShowContextMenu { node_id, x, y } => {
+                let actions = self.build_context_actions(node_id);
+                self.context_menu = if actions.is_empty() {
+                    None
+                } else {
+                    Some(ContextMenu {
+                        node_id,
+                        x,
+                        y,
+                        actions,
+                    })
+                };
+                true
+            }
+
+            Msg::HideContextMenu => {
+                self.context_menu = None;
+                true
+            }
+
+            Msg::ContextMenuAction(action) => {
+                let node_id = match &self.context_menu {
+                    Some(m) => m.node_id,
+                    None => return false,
+                };
+                self.context_menu = None;
+                match action {
+                    ContextAction::ExpandCollapsed => {
+                        ctx.link().send_message(Msg::ExpandCollapsed(node_id))
+                    }
+                    ContextAction::CollapseOthersInTier => {
+                        ctx.link().send_message(Msg::CollapseOthersInTier(node_id))
+                    }
+                    ContextAction::CollapseSelected => {
+                        ctx.link().send_message(Msg::CollapseSelected)
+                    }
+                    ContextAction::CollapseSuccsByTier => {
+                        ctx.link().send_message(Msg::CollapseSuccsByTier(node_id))
+                    }
+                    ContextAction::CollapsePredsByTier => {
+                        ctx.link().send_message(Msg::CollapsePredsByTier(node_id))
+                    }
+                }
+                false
             }
 
             // ----------------------------------------------------------------
             Msg::MouseDown(e) => {
+                // 左クリックでコンテキストメニューを閉じる
+                if self.context_menu.is_some() {
+                    self.context_menu = None;
+                    return true;
+                }
                 let (sx, sy) = (e.offset_x() as f64, e.offset_y() as f64);
                 self.drag_start = Some((sx, sy, self.pan_x, self.pan_y));
                 false
@@ -282,21 +474,31 @@ impl Component for App {
 
             Msg::MouseUp(e) => {
                 let (sx, sy) = (e.offset_x() as f64, e.offset_y() as f64);
-                let is_click = self.drag_start.map_or(true, |(start_sx, start_sy, _, _)| {
-                    (sx - start_sx).abs() < 4.0 && (sy - start_sy).abs() < 4.0
+                let is_click = self.drag_start.map_or(true, |(ssx, ssy, _, _)| {
+                    (sx - ssx).abs() < 4.0 && (sy - ssy).abs() < 4.0
                 });
                 self.drag_start = None;
 
                 if is_click {
                     let (lx, ly) = self.to_logical(sx, sy);
                     match self.hit_test(lx, ly) {
+                        Some(HoverTarget::NodeBody(id)) => {
+                            ctx.link().send_message(Msg::ToggleSelect(id))
+                        }
                         Some(HoverTarget::HandleLeft(id)) => {
-                            ctx.link().send_message(self.handle_left_click(id))
+                            // «ハンドル: 先行方向へのノード追加（将来的な拡張用）
+                            // 現在は何もしない（コンテキストメニューで操作）
+                            let _ = id;
                         }
                         Some(HoverTarget::HandleRight(id)) => {
-                            ctx.link().send_message(self.handle_right_click(id))
+                            let _ = id;
                         }
-                        _ => {}
+                        None => {
+                            // 空白クリックで選択解除
+                            if !self.layout.selected.is_empty() {
+                                ctx.link().send_message(Msg::ClearSelection);
+                            }
+                        }
                     }
                 }
                 false
@@ -310,6 +512,23 @@ impl Component for App {
                     return true;
                 }
                 false
+            }
+
+            // ----------------------------------------------------------------
+            Msg::ContextMenu(e) => {
+                e.prevent_default();
+                let (sx, sy) = (e.offset_x() as f64, e.offset_y() as f64);
+                let (lx, ly) = self.to_logical(sx, sy);
+                if let Some(HoverTarget::NodeBody(id)) = self.hit_test(lx, ly) {
+                    ctx.link().send_message(Msg::ShowContextMenu {
+                        node_id: id,
+                        x: sx,
+                        y: sy,
+                    });
+                } else {
+                    self.context_menu = None;
+                }
+                true
             }
 
             // ----------------------------------------------------------------
@@ -345,21 +564,26 @@ impl Component for App {
                     Ok(records) => {
                         self.cache.insert(shard_idx, records);
 
-                        if let Some(root_id) = self.root_id {
-                            if self.layout.nodes.is_empty() {
-                                // 初回ロード: 起点単体で表示
-                                if let Some(root) = self.find_cloned(root_id) {
-                                    self.layout = Layout::single(root);
-                                }
+                        // pending_add のうちこのシャードで解決できるものを追加
+                        let resolved: Vec<u32> = self
+                            .pending_add
+                            .iter()
+                            .copied()
+                            .filter(|&id| shard_index(id) == shard_idx)
+                            .collect();
+
+                        for id in resolved {
+                            self.pending_add.remove(&id);
+                            if let Some(record) = self.find_cloned(id) {
+                                self.layout
+                                    .add_node(record, &self.cache, SortMode::default());
                             }
-                            // 展開待ち（ExpandLeft/Right がフェッチを起動した場合）は
-                            // ShardLoaded 後に再度 ExpandLeft/Right が呼ばれる設計のため
-                            // ここでは append しない
-                            self.redraw();
                         }
+
+                        self.redraw();
                     }
                     Err(e) => {
-                        self.root_error = Some(format!("デシリアライズ失敗: {e}"));
+                        self.error = Some(format!("デシリアライズ失敗: {e}"));
                     }
                 }
                 true
@@ -371,7 +595,8 @@ impl Component for App {
                 message,
             } => {
                 self.fetching.remove(&triggered_by);
-                self.root_error = Some(format!("フェッチエラー: {message}"));
+                self.pending_add.remove(&triggered_by);
+                self.error = Some(format!("フェッチエラー: {message}"));
                 true
             }
         }
@@ -384,42 +609,88 @@ impl Component for App {
             let el: HtmlInputElement = e.target_unchecked_into();
             Msg::InputChanged(el.value())
         });
-        let on_search = link.callback(|_| Msg::Search);
-        let on_keydown =
-            link.batch_callback(|e: KeyboardEvent| (e.key() == "Enter").then_some(Msg::Search));
+        let on_add = {
+            let input = self.input.trim().to_string();
+            link.callback(move |_| {
+                match input.parse::<u32>() {
+                    Ok(id) => Msg::AddNode(id),
+                    Err(_) => Msg::AddNode(u32::MAX), // バリデーションエラー用
+                }
+            })
+        };
+        let on_keydown = {
+            let input = self.input.trim().to_string();
+            link.batch_callback(move |e: KeyboardEvent| {
+                if e.key() == "Enter" {
+                    match input.parse::<u32>() {
+                        Ok(id) => Some(Msg::AddNode(id)),
+                        Err(_) => Some(Msg::AddNode(u32::MAX)),
+                    }
+                } else {
+                    None
+                }
+            })
+        };
+        let on_clear = link.callback(|_| Msg::ClearGraph);
         let on_mousedown = link.callback(Msg::MouseDown);
         let on_mousemove = link.callback(Msg::MouseMove);
         let on_mouseup = link.callback(Msg::MouseUp);
         let on_mouseleave = link.callback(|_| Msg::MouseLeave);
+        let on_contextmenu = link.callback(Msg::ContextMenu);
         let on_wheel = link.callback(Msg::Wheel);
 
-        let popup = self.view_popup();
-        let tooltip = self.view_tooltip();
-        let error = if let Some(ref msg) = self.root_error {
-            html! { <div class="error-banner">{msg}</div> }
-        } else {
-            html! {}
+        // 凡例
+        let legend: Html = util::value_labels()
+            .iter()
+            .enumerate()
+            .map(|(i, &label)| {
+                html! {
+                    <span class="legend-item" key={i}>{label}</span>
+                }
+            })
+            .collect();
+
+        // 階層別ソートモードボタン（表示中の tier ごとに生成）
+        let sort_buttons: Html = {
+            let mut tiers: Vec<u32> = self.layout.tiers().collect();
+            tiers.sort_unstable();
+            tiers
+                .iter()
+                .map(|&tier| {
+                    let mode = self.layout.sort_mode_of(tier);
+                    let label = format!("T{} {}", tier, mode.label());
+                    let cb = link.callback(move |_| Msg::CycleSortMode(tier));
+                    html! {
+                        <button class="sort-btn" onclick={cb} key={tier}>{label}</button>
+                    }
+                })
+                .collect()
         };
+
+        // フェッチ中インジケータ
         let loading = if !self.fetching.is_empty() {
             html! { <div class="loading-indicator"><span class="spinner"/></div> }
         } else {
             html! {}
         };
 
-        // 凡例パネル: util::value_labels() を横並びで表示
-        let legend: Html = util::value_labels()
-            .iter()
-            .map(|&label| {
-                html! {
-                    <span class="legend-item">{label}</span>
-                }
-            })
-            .collect();
+        // エラーバナー
+        let error = if let Some(ref msg) = self.error {
+            html! { <div class="error-banner">{msg}</div> }
+        } else {
+            html! {}
+        };
+
+        // コンテキストメニュー
+        let context_menu = self.view_context_menu(ctx);
+
+        // DOM ポップアップ（縮小時ホバー）
+        let popup = self.view_popup();
 
         html! {
             <>
                 <style>{STYLES}</style>
-                <div class="app">
+                <div class="app" onclick={link.callback(|_| Msg::HideContextMenu)}>
                     <header class="app-header">
                         <span class="app-title">{"DAG Explorer"}</span>
                         <div class="search-row">
@@ -433,11 +704,14 @@ impl Component for App {
                                 onkeydown={on_keydown}
                                 class="search-input"
                             />
-                            <button class="search-btn" onclick={on_search}>{"Search"}</button>
+                            <button class="search-btn" onclick={on_add}>{"追加"}</button>
+                            <button class="clear-btn"  onclick={on_clear}>{"クリア"}</button>
                         </div>
                         <div class="legend">{legend}</div>
+                        <div class="sort-buttons">{sort_buttons}</div>
                         {loading}
                     </header>
+
                     <div class="canvas-wrap">
                         {error}
                         <canvas
@@ -449,13 +723,14 @@ impl Component for App {
                             onmousemove={on_mousemove}
                             onmouseup={on_mouseup}
                             onmouseleave={on_mouseleave}
+                            oncontextmenu={on_contextmenu}
                             onwheel={on_wheel}
                         />
                         {popup}
-                        {tooltip}
-                        if self.root_id.is_none() {
+                        {context_menu}
+                        if self.layout.nodes.is_empty() {
                             <div class="canvas-hint">
-                                <p>{"ノード ID を入力して検索してください"}</p>
+                                <p>{"ノード ID を入力して追加してください"}</p>
                                 <p class="hint-sub">
                                     {format!("{} nodes · shards of {}", TOTAL_NODES, SHARD_SIZE)}
                                 </p>
@@ -473,10 +748,50 @@ impl Component for App {
 }
 
 // ---------------------------------------------------------------------------
-// view のサブ関数（ポップアップ・ツールチップ）
+// view のサブ関数
 // ---------------------------------------------------------------------------
 
 impl App {
+    /// コンテキストメニューの DOM 要素
+    fn view_context_menu(&self, ctx: &Context<Self>) -> Html {
+        let cm = match &self.context_menu {
+            Some(m) => m,
+            None => return html! {},
+        };
+
+        let style = format!("left:{}px;top:{}px", cm.x, cm.y + HEADER_H);
+
+        let items: Html = cm
+            .actions
+            .iter()
+            .map(|action| {
+                let label = match action {
+                    ContextAction::ExpandCollapsed => "展開",
+                    ContextAction::CollapseOthersInTier => "同階層の他ノードを縮約",
+                    ContextAction::CollapseSelected => "選択ノードを縮約",
+                    ContextAction::CollapseSuccsByTier => "後継ノードを階層ごとに縮約",
+                    ContextAction::CollapsePredsByTier => "先行ノードを階層ごとに縮約",
+                };
+                let action = action.clone();
+                let cb = ctx
+                    .link()
+                    .callback(move |_| Msg::ContextMenuAction(action.clone()));
+                html! {
+                    <li class="context-menu-item" onclick={cb}>{label}</li>
+                }
+            })
+            .collect();
+
+        html! {
+            <ul class="context-menu" style={style}
+                onclick={ctx.link().callback(|e: MouseEvent| { e.stop_propagation(); Msg::HideContextMenu })}
+            >
+                {items}
+            </ul>
+        }
+    }
+
+    /// 縮小時ホバーの DOM ポップアップ
     fn view_popup(&self) -> Html {
         if self.scale >= POPUP_SCALE_THRESHOLD {
             return html! {};
@@ -485,10 +800,16 @@ impl App {
             Some(HoverTarget::NodeBody(id)) => *id,
             _ => return html! {},
         };
-        let gn = match self.layout.nodes.iter().find(|n| n.record.id == hovered_id) {
+        let gn = match self.layout.find_node(hovered_id) {
             Some(n) => n,
             None => return html! {},
         };
+        let record = match gn.kind.as_normal() {
+            Some(r) => r,
+            None => return html! {},
+        };
+
+        use util::NodeData;
         let cx = self.canvas_w / 2.0;
         let cy = self.canvas_h / 2.0;
         let sx = (gn.cx() + self.pan_x) * self.scale + cx;
@@ -498,47 +819,17 @@ impl App {
             sx,
             sy + HEADER_H
         );
+
+        let info = record
+            .values()
+            .map(|v| format!("{:5}", v))
+            .collect::<Vec<_>>()
+            .join("  ");
+
         html! {
             <div class="node-popup" style={style}>
-                <div class="popup-label">{format!("#{} {}", gn.record.id, gn.record.label)}</div>
-                <div class="popup-info">{info_text(gn.record.values())}</div>
-            </div>
-        }
-    }
-
-    fn view_tooltip(&self) -> Html {
-        let (hovered_id, is_left) = match &self.hover {
-            Some(HoverTarget::HandleLeft(id)) => (*id, true),
-            Some(HoverTarget::HandleRight(id)) => (*id, false),
-            _ => return html! {},
-        };
-        let gn = match self.layout.nodes.iter().find(|n| n.record.id == hovered_id) {
-            Some(n) => n,
-            None => return html! {},
-        };
-        let count = if is_left {
-            gn.record.predecessors.len()
-        } else {
-            gn.record.successors.len()
-        };
-        let label = if is_left { "先行" } else { "後継" };
-        let (hx, hy) = if is_left {
-            gn.handle_left_center()
-        } else {
-            gn.handle_right_center()
-        };
-        let cx = self.canvas_w / 2.0;
-        let cy = self.canvas_h / 2.0;
-        let sx = (hx + self.pan_x) * self.scale + cx;
-        let sy = (hy + self.pan_y) * self.scale + cy + HEADER_H;
-        let tfm = if is_left {
-            "translateX(-120%) translateY(-50%)"
-        } else {
-            "translateX(20%) translateY(-50%)"
-        };
-        html! {
-            <div class="tooltip" style={format!("left:{}px;top:{}px;transform:{}", sx, sy, tfm)}>
-                {format!("{} {}件", label, count)}
+                <div class="popup-label">{format!("#{} {}", record.id, record.label)}</div>
+                <div class="popup-info">{info}</div>
             </div>
         }
     }

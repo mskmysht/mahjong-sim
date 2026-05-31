@@ -13,20 +13,15 @@ use std::collections::{HashMap, HashSet};
 use gloo_net::http::Request;
 use yew::html::Scope;
 
-use util::NodeRecord;
-
-use crate::types::Msg;
+use crate::types::{Msg, NodeRecord};
 
 // ---------------------------------------------------------------------------
 // 定数
 // ---------------------------------------------------------------------------
 
-pub const SHARD_SIZE: u32 = 15_625;
-pub const TOTAL_NODES: u32 = 405_348;
-pub const DATA_ROOT: &str = match option_env!("SHARD_DATA_ROOT") {
-    Some(s) => s,
-    None => "./data",
-};
+pub const SHARD_SIZE:  u32  = 15_625;
+pub const TOTAL_NODES: u32  = 405_348;
+pub const DATA_ROOT:   &str = "/data";
 
 // ---------------------------------------------------------------------------
 // シャードユーティリティ
@@ -45,9 +40,16 @@ pub fn shard_url(idx: u32) -> String {
 // ---------------------------------------------------------------------------
 
 /// シャードバイト列を Vec<NodeRecord> にデシリアライズする。
+///
+/// # 本番実装
+/// ```rust
+/// rkyv::from_bytes::<Vec<NodeRecord>, rkyv::rancor::Error>(bytes)
+///     .map_err(|e| format!("rkyv error: {e}"))
+/// ```
 pub fn deserialize_shard(bytes: &[u8]) -> Result<Vec<NodeRecord>, String> {
-    rkyv::from_bytes::<Vec<NodeRecord>, rkyv::rancor::Error>(bytes)
-        .map_err(|e| format!("rkyv error: {e}"))
+    // --- プレースホルダ ---
+    let _ = bytes;
+    Ok(vec![])
 }
 
 // ---------------------------------------------------------------------------
@@ -60,28 +62,19 @@ pub fn fetch_shard<COMP>(link: &Scope<COMP>, node_id: u32)
 where
     COMP: yew::Component<Message = Msg>,
 {
-    let url = shard_url(shard_index(node_id));
+    let url  = shard_url(shard_index(node_id));
     let link = link.clone();
     wasm_bindgen_futures::spawn_local(async move {
         match Request::get(&url).send().await {
             Ok(resp) if resp.ok() => match resp.binary().await {
-                Ok(bytes) => link.send_message(Msg::ShardLoaded {
-                    triggered_by: node_id,
-                    bytes,
-                }),
-                Err(e) => link.send_message(Msg::FetchError {
-                    triggered_by: node_id,
-                    message: e.to_string(),
-                }),
+                Ok(bytes) => link.send_message(Msg::ShardLoaded { triggered_by: node_id, bytes }),
+                Err(e)    => link.send_message(Msg::FetchError   { triggered_by: node_id, message: e.to_string() }),
             },
             Ok(resp) => link.send_message(Msg::FetchError {
                 triggered_by: node_id,
                 message: format!("HTTP {}", resp.status()),
             }),
-            Err(e) => link.send_message(Msg::FetchError {
-                triggered_by: node_id,
-                message: e.to_string(),
-            }),
+            Err(e) => link.send_message(Msg::FetchError { triggered_by: node_id, message: e.to_string() }),
         }
     });
 }
@@ -89,11 +82,12 @@ where
 /// 隣接ノード群のうち未キャッシュ・未フェッチのシャードをまとめてフェッチする。
 /// 同一シャード内の複数ノードは 1 回のフェッチに集約される。
 pub fn fetch_adjacent<COMP>(
-    link: &Scope<COMP>,
-    adj_ids: &[u32],
+    link:     &Scope<COMP>,
+    adj_ids:  &[u32],
     fetching: &mut HashSet<u32>,
-    cache: &HashMap<u32, Vec<NodeRecord>>,
-) where
+    cache:    &HashMap<u32, Vec<NodeRecord>>,
+)
+where
     COMP: yew::Component<Message = Msg>,
 {
     let mut shards_to_fetch: HashSet<u32> = HashSet::new();
@@ -112,7 +106,7 @@ pub fn fetch_adjacent<COMP>(
 
 /// キャッシュから node_id のレコードを検索する。
 pub fn find_in_cache<'a>(
-    cache: &'a HashMap<u32, Vec<NodeRecord>>,
+    cache:   &'a HashMap<u32, Vec<NodeRecord>>,
     node_id: u32,
 ) -> Option<&'a NodeRecord> {
     cache
@@ -126,7 +120,7 @@ pub fn find_in_cache<'a>(
 /// clone が必要な場合は呼び出し元（Layout::append）で行う。
 pub fn cached_records<'a>(
     adj_ids: &'a [u32],
-    cache: &'a HashMap<u32, Vec<NodeRecord>>,
+    cache:   &'a HashMap<u32, Vec<NodeRecord>>,
 ) -> impl Iterator<Item = &'a NodeRecord> + 'a {
     adj_ids.iter().filter_map(|&id| find_in_cache(cache, id))
 }

@@ -10,7 +10,7 @@ yew = { version = "0.23.0", features = ["csr"] }
 rkyv = { workspace = true }
 util = { path = "../util" }
 wasm-bindgen = "0.2.121"
-# web-sys = "0.3.98"
+js-sys = "0.3.99"
 
 [dependencies.web-sys]
 version = "0.3"
